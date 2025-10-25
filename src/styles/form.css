@@ -1,0 +1,98 @@
+.list-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  border: 1px solid var(--input-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+button:active {
+  transform: scale(0.97);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.list-input,
+.list-select {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--input-border);
+  font-size: 1rem;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
+.list-input:focus,
+.list-select:focus {
+  outline: 2px solid #7c9dff;
+  outline-offset: 1px;
+}
+
+.list-select {
+  background-color: #f8faff;
+}
+
+.list-submit {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #6A83F3, #4A67F5);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.list-submit:active {
+  transform: scale(0.97);
+}
+
+.list-submit:focus-visible {
+  outline: 2px solid #3949ff;
+  outline-offset: 3px;
+}
+
+.suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  border: 1px solid var(--input-border);
+  border-radius: 12px;
+  background-color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.suggestions__item {
+  padding: 8px 14px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.suggestions__item:hover,
+.suggestions__item:focus {
+  background-color: rgba(120, 142, 255, 0.12);
+}
+
+@media (min-width: 640px) {
+  .list-form {
+    padding: 20px 18px;
+  }
+}

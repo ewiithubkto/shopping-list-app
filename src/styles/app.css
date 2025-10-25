@@ -1,0 +1,69 @@
+:root {
+  --primary: #4A67F5;
+  --primary-light: #9CB3FF;
+  --text: #213547;
+  --muted: #A6ADBB;
+  --danger: #E55B5B;
+  --input-border: #D9E3FF;
+}
+
+.app-wrapper {
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 100vh;
+}
+
+.app-title {
+  margin: 0 0 0.5rem;
+  text-align: center;
+  line-height: 1.2;
+  font-size: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.app-title::first-letter {
+  margin-right: 10px;
+  font-size: 1.85rem;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.button,
+.btn,
+button {
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.06);
+}
+
+button:active {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
+@media (min-width: 640px) {
+  .app-wrapper {
+    padding: 32px 24px 64px;
+  }
+}

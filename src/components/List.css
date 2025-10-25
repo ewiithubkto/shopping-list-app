@@ -1,0 +1,36 @@
+li {
+  transition: all 0.3s ease;
+  opacity: 1;
+}
+
+li.removing {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+li button {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+li:hover button {
+  opacity: 1;
+}
+.delete-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+li:hover .delete-btn {
+  opacity: 1;
+}
