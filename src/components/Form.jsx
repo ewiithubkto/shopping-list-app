@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import products from "../data/products.json";
 import "../styles/form.css";
 
@@ -26,19 +26,21 @@ function getCategoryByName(name) {
 
 export default function Form({ onAddItem, items, library, defaultCategory }) {
   const [text, setText] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
   const [category, setCategory] = useState("");
 
   function handleChange(e) {
     const value = e.target.value;
     setText(value);
-
-    // фильтруем библиотеку для подсказок
-    const filtered = library.filter((item) =>
-      item.toLowerCase().includes(value.toLowerCase())
-    );
-    setSuggestions(filtered.slice(0, 5)); // максимум 5 подсказок
   }
+
+  const suggestions = useMemo(() => {
+    const query = text.trim().toLowerCase();
+    if (!query) return [];
+
+    return library
+      .filter((item) => item.toLowerCase().includes(query))
+      .slice(0, 5);
+  }, [library, text]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -56,7 +58,6 @@ export default function Form({ onAddItem, items, library, defaultCategory }) {
     onAddItem(trimmed, resolvedCategory);
     setText("");
     setCategory("");
-    setSuggestions([]);
   }
 
   function handleSuggestionClick(name) {
@@ -70,7 +71,6 @@ export default function Form({ onAddItem, items, library, defaultCategory }) {
     onAddItem(name, resolvedCategory);
     setText("");
     setCategory("");
-    setSuggestions([]);
   }
 
   return (
@@ -101,13 +101,15 @@ export default function Form({ onAddItem, items, library, defaultCategory }) {
       {/* показываем подсказки */}
       {suggestions.length > 0 && (
         <ul className="suggestions">
-          {suggestions.map((sug, index) => (
-            <li
-              key={index}
-              className="suggestions__item"
-              onClick={() => handleSuggestionClick(sug)}
-            >
-              {sug}
+          {suggestions.map((sug) => (
+            <li key={sug}>
+              <button
+                type="button"
+                className="suggestions__item"
+                onClick={() => handleSuggestionClick(sug)}
+              >
+                {sug}
+              </button>
             </li>
           ))}
         </ul>

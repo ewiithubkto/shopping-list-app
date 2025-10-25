@@ -5,6 +5,15 @@
   --muted: #A6ADBB;
   --danger: #E55B5B;
   --input-border: #D9E3FF;
+  --radius-lg: 12px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --space-2xs: 4px;
+  --space-xs: 6px;
+  --space-sm: 10px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
 }
 
 .app-wrapper {
@@ -20,12 +29,20 @@
 .app-title {
   margin: 0 0 0.5rem;
   text-align: center;
-  line-height: 1.2;
-  font-size: 2rem;
+  line-height: 1.1;
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  font-family: "Poppins", "Inter", system-ui, -apple-system, sans-serif;
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  letter-spacing: 0.02em;
+  background: linear-gradient(135deg, var(--primary), #2737b8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 6px 18px rgba(60, 81, 220, 0.25);
 }
 
 .app-title::first-letter {
@@ -38,6 +55,23 @@
   font-size: 1.125rem;
   font-weight: 600;
   text-align: center;
+}
+
+.app-wrapper .list-view-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  gap: 12px;
+  padding: 0 16px;
+  box-sizing: border-box;
+  align-self: stretch;
+}
+
+.app-wrapper .view-button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .button,
@@ -62,8 +96,18 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+@media (max-width: 600px) {
+  .app-wrapper .list-view-toggle {
+    gap: 10px;
+  }
+}
+
 @media (min-width: 640px) {
   .app-wrapper {
     padding: 32px 24px 64px;
+  }
+
+  .app-wrapper .list-view-toggle {
+    padding: 0 18px;
   }
 }

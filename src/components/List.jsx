@@ -7,6 +7,32 @@ const VIEW_MODES = {
   shopping: "shopping",
 };
 
+function usePrefersReducedMotion() {
+  const [prefers, setPrefers] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handleChange = (event) => {
+      setPrefers(event.matches);
+    };
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
+
+  return prefers;
+}
+
 export default function List({
   items,
   onDelete,
@@ -19,6 +45,9 @@ export default function List({
   const [recentlyAddedIds, setRecentlyAddedIds] = useState(() => new Set());
   const previousIdsRef = useRef(new Set(items.map((item) => item.id)));
   const animationTimeoutsRef = useRef([]);
+  const isShoppingView = mode === VIEW_MODES.shopping;
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const shouldAnimate = !prefersReducedMotion;
 
   useEffect(() => {
     return () => {
@@ -30,14 +59,24 @@ export default function List({
   }, []);
 
   useEffect(() => {
+    const currentIds = new Set(items.map((item) => item.id));
+
+    if (!shouldAnimate) {
+      animationTimeoutsRef.current.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      animationTimeoutsRef.current = [];
+      previousIdsRef.current = currentIds;
+      setRecentlyAddedIds(() => new Set());
+      return;
+    }
+
     const prevIds = previousIdsRef.current;
-    const currentIds = new Set();
     const newIds = [];
 
-    items.forEach((item) => {
-      currentIds.add(item.id);
-      if (!prevIds.has(item.id)) {
-        newIds.push(item.id);
+    currentIds.forEach((id) => {
+      if (!prevIds.has(id)) {
+        newIds.push(id);
       }
     });
 
@@ -78,7 +117,7 @@ export default function List({
     }
 
     previousIdsRef.current = currentIds;
-  }, [items]);
+  }, [items, shouldAnimate]);
 
   function handlePurchase(id) {
     setRemovingId(id);
@@ -108,10 +147,13 @@ export default function List({
       const linkedItem = itemsByName.get(normalized);
       libraryNames.add(normalized);
 
+      const id = linkedItem ? linkedItem.id : `catalog-${normalized}`;
+
       addToCategory(category, {
-        key: linkedItem ? linkedItem.id : `catalog-${normalized}`,
-        label: name,
+        id,
+        name,
         active: Boolean(linkedItem?.active),
+        bought: linkedItem ? Boolean(linkedItem.bought) : true,
         linkedItem,
         category: category || defaultCategory,
       });
@@ -122,9 +164,10 @@ export default function List({
       if (libraryNames.has(normalized)) return;
 
       addToCategory(item.category, {
-        key: item.id,
-        label: item.name,
+        id: item.id,
+        name: item.name,
         active: Boolean(item.active),
+        bought: Boolean(item.bought),
         linkedItem: item,
         category: item.category || defaultCategory,
       });
@@ -188,7 +231,7 @@ export default function List({
           }`}
           onClick={() => setMode(VIEW_MODES.shopping)}
         >
-          🛒 Список покупок
+          🛒 Покупки
         </button>
       </div>
 
@@ -198,17 +241,15 @@ export default function List({
             <h3 className="category-title">{category}</h3>
             <ul className="item-list">
               {categoryItems.map((item) => {
-                const isRemoving =
-                  item.linkedItem && removingId === item.linkedItem.id;
-                const isAdded =
-                  item.linkedItem &&
-                  recentlyAddedIds.has(item.linkedItem.id);
+                const isLinked = Boolean(item.linkedItem);
+                const isRemoving = isLinked && removingId === item.id;
+                const isAdded = isLinked && recentlyAddedIds.has(item.id);
                 const itemClassName = `item${
                   isRemoving ? " removing" : ""
                 }${isAdded ? " added" : ""}`;
 
                 return (
-                  <li key={item.key} className={itemClassName}>
+                  <li key={item.id} className={itemClassName}>
                     <label className="item-label">
                       <input
                         className="item-checkbox"
@@ -216,24 +257,22 @@ export default function List({
                         checked={item.active}
                         onChange={() =>
                           onActiveChange(
-                            item.label,
+                            item.name,
                             item.category,
                             !item.active
                           )
                         }
                       />
-                      {item.label}
+                      {item.name}
                     </label>
-                    <button
-                      className="item-delete"
-                      disabled={!item.linkedItem}
-                      onClick={() =>
-                        item.linkedItem &&
-                        onDelete(item.linkedItem.id, item.linkedItem.name)
-                      }
-                    >
-                      ❌
-                    </button>
+                    {!isShoppingView && !item.bought && (
+                      <button
+                        className="item-delete"
+                        onClick={() => onDelete(item.id, item.name)}
+                      >
+                        ❌
+                      </button>
+                    )}
                   </li>
                 );
               })}

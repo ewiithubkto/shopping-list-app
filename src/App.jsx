@@ -3,14 +3,27 @@ import Form from "./components/Form";
 import List from "./components/List";
 import "./styles/app.css";
 
+const STORAGE_KEYS = {
+  items: "shoppingList",
+  library: "productLibrary",
+};
+
+const DEFAULT_CATEGORY = "Другое";
+
+function safeParse(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
 export default function App() {
-  const DEFAULT_CATEGORY = "Другое";
-
   const [items, setItems] = useState(() => {
-    const saved = localStorage.getItem("shoppingList");
-    const parsed = saved ? JSON.parse(saved) : [];
+    const stored = safeParse(localStorage.getItem(STORAGE_KEYS.items), []);
 
-    return parsed.map((item) => ({
+    return stored.map((item) => ({
       ...item,
       category: item?.category ?? DEFAULT_CATEGORY,
       active: item?.active ?? true,
@@ -18,10 +31,9 @@ export default function App() {
   });
 
   // 🧠 библиотека всех продуктов
-  const [library, setLibrary] = useState(() => {
-    const saved = localStorage.getItem("productLibrary");
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [library, setLibrary] = useState(() =>
+    safeParse(localStorage.getItem(STORAGE_KEYS.library), [])
+  );
 
   function addItem(name, category = DEFAULT_CATEGORY) {
     const trimmed = name.trim();
@@ -129,24 +141,20 @@ export default function App() {
     setItems(updatedItems);
 
     // Удаляем из библиотеки
-    const updatedLibrary = library.filter((product) => product !== name);
-    if (updatedLibrary.length !== library.length) {
-      setLibrary(updatedLibrary);
-      localStorage.setItem("productLibrary", JSON.stringify(updatedLibrary));
-    }
+    setLibrary((prev) => prev.filter((product) => product !== name));
   }
   // сохраняем изменения в списке покупок
   useEffect(() => {
-    localStorage.setItem("shoppingList", JSON.stringify(items));
+    localStorage.setItem(STORAGE_KEYS.items, JSON.stringify(items));
   }, [items]);
 
   useEffect(() => {
-    localStorage.setItem("productLibrary", JSON.stringify(library));
+    localStorage.setItem(STORAGE_KEYS.library, JSON.stringify(library));
   }, [library]);
 
   return (
     <div className="app-wrapper">
-      <h1 className="app-title">🛒 Список покупок</h1>
+      <h1 className="app-title">🛍️ План покупок</h1>
       <Form
         onAddItem={addItem}
         items={items}

@@ -1,37 +1,12 @@
 .list-container {
   display: flex;
   flex-direction: column;
-  gap: clamp(12px, 2vw, 20px);
-}
-
-* {
-  -webkit-tap-highlight-color: transparent;
-}
-
-::placeholder {
-  color: var(--muted);
-  opacity: 0.7;
-}
-
-button {
-  touch-action: manipulation;
-}
-
-button:active {
-  transform: scale(0.97);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.list-view-toggle {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: center;
+  gap: clamp(var(--space-md), 2vw, var(--space-xl));
 }
 
 .view-button {
   padding: 10px 18px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--input-border);
   background-color: #f6f8ff;
   font-weight: 600;
@@ -49,15 +24,16 @@ button:active {
 
 .category-section {
   background-color: #ffffff;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--input-border);
-  padding: 10px 12px;
+  padding: var(--space-sm) var(--space-md);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   box-sizing: border-box;
 }
 
 .category-title {
-  margin: 0 0 6px;
+  margin-top: var(--space-sm);
+  margin-bottom: var(--space-xs);
   font-weight: 600;
   color: var(--text);
 }
@@ -83,11 +59,20 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  gap: var(--space-2xs);
+  margin: 0;
+}
+
+.item {
+  font-size: 15.5px;
+  line-height: 1.35;
+  padding: var(--space-xs) 0;
+}
+
+.list-item {
   padding: 0;
   line-height: 1;
-  transition: opacity 0.25s ease, transform 0.25s ease;
-  gap: 4px;
-  margin: 0;
 }
 
 .item.added {
@@ -126,10 +111,10 @@ input[type="checkbox"] {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 14px;
+  gap: var(--space-xs);
+  font-size: inherit;
   font-weight: 400;
-  line-height: 1.05;
+  line-height: inherit;
 }
 
 .list-item .name {
@@ -152,7 +137,8 @@ input[type="checkbox"] {
   cursor: pointer;
   font-size: 16px;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
   padding: 0 !important;
   margin: 0;
   line-height: 1;
@@ -163,34 +149,38 @@ input[type="checkbox"] {
   justify-content: center;
 }
 
-.item-delete:disabled {
-  cursor: not-allowed;
-  opacity: 0.25;
-}
-
 .item:hover .item-delete {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .shopping-section {
   background-color: #ffffff;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--input-border);
   padding: 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   box-sizing: border-box;
 }
 
+@media (max-width: 600px) {
+  .item {
+    font-size: 16px;
+    line-height: 1.4;
+    padding: 7px 0;
+  }
+}
+
 .shopping-divider {
   list-style: none;
   height: 1px;
   background: rgba(0, 0, 0, 0.12);
-  margin: 12px 0 0;
+  margin: var(--space-md) 0 0;
 }
 
 .purchased-label {
   list-style: none;
-  margin: 16px 0 2px;
+  margin: var(--space-lg) 0 2px;
   font-size: 0.75rem;
   color: var(--muted);
   font-weight: 600;
@@ -199,9 +189,9 @@ input[type="checkbox"] {
 
 .shopping-clear {
   width: 100%;
-  margin-bottom: 12px;
-  padding: 12px;
-  border-radius: 12px;
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--danger);
   color: var(--danger);
   background: #FFD7D7;
@@ -228,23 +218,5 @@ input[type="checkbox"] {
 
 .item-list li + li,
 .shopping-list li + li {
-  margin-top: 4px;
-}
-.list-container {
-  display: flex;
-  flex-direction: column;
-  gap: clamp(12px, 2vw, 20px);
-}
-
-* {
-  -webkit-tap-highlight-color: transparent;
-}
-
-::placeholder {
-  color: var(--muted);
-  opacity: 0.7;
-}
-
-button {
-  touch-action: manipulation;
+  margin-top: var(--space-2xs);
 }
