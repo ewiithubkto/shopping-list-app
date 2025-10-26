@@ -24,7 +24,24 @@ function getCategoryByName(name) {
   return match?.category;
 }
 
-export default function Form({ onAddItem, items, library, defaultCategory }) {
+const MAX_SUGGESTIONS = 5;
+
+function sanitizeWordStart(word) {
+  return word.replace(/^[^a-zA-Zа-яА-ЯёЁ0-9]+/, "").toLowerCase();
+}
+
+function matchesQuery(name, query) {
+  return name
+    .split(" ")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .some((word) => {
+      const normalizedWord = sanitizeWordStart(word);
+      return normalizedWord && normalizedWord.startsWith(query);
+    });
+}
+
+export default function Form({ onAddItem, items, defaultCategory }) {
   const [text, setText] = useState("");
   const [category, setCategory] = useState("");
 
@@ -37,10 +54,23 @@ export default function Form({ onAddItem, items, library, defaultCategory }) {
     const query = text.trim().toLowerCase();
     if (!query) return [];
 
-    return library
-      .filter((item) => item.toLowerCase().includes(query))
-      .slice(0, 5);
-  }, [library, text]);
+    const seen = new Set();
+    const matches = [];
+
+    for (const { name } of products) {
+      const normalizedName = name.trim().toLowerCase();
+      if (seen.has(normalizedName)) continue;
+
+      if (matchesQuery(name, query)) {
+        seen.add(normalizedName);
+        matches.push(name);
+      }
+
+      if (matches.length === MAX_SUGGESTIONS) break;
+    }
+
+    return matches;
+  }, [text, products]);
 
   function handleSubmit(e) {
     e.preventDefault();

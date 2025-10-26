@@ -1,39 +1,34 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import { onValue, ref, set } from "firebase/database";
 import Form from "./components/Form";
 import List from "./components/List";
+import { rtdb } from "./firebase";
 import "./styles/app.css";
-
-const STORAGE_KEYS = {
-  items: "shoppingList",
-  library: "productLibrary",
-};
 
 const DEFAULT_CATEGORY = "Другое";
 
-function safeParse(value, fallback) {
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
+const ITEMS_PATH = "shopping/items";
+
+function normalizeItem(item) {
+  if (!item) return null;
+
+  return {
+    id: item.id ?? Date.now(),
+    name: item.name ?? "",
+    bought: Boolean(item.bought),
+    category: item.category ?? DEFAULT_CATEGORY,
+    active: item.active ?? true,
+  };
+}
+
+function areItemsEqual(first, second) {
+  return JSON.stringify(first) === JSON.stringify(second);
 }
 
 export default function App() {
-  const [items, setItems] = useState(() => {
-    const stored = safeParse(localStorage.getItem(STORAGE_KEYS.items), []);
-
-    return stored.map((item) => ({
-      ...item,
-      category: item?.category ?? DEFAULT_CATEGORY,
-      active: item?.active ?? true,
-    }));
-  });
-
-  // 🧠 библиотека всех продуктов
-  const [library, setLibrary] = useState(() =>
-    safeParse(localStorage.getItem(STORAGE_KEYS.library), [])
-  );
+  const [items, setItems] = useState([]);
+  const isSyncedRef = useRef(false);
+  const lastSyncedRef = useRef([]);
 
   function addItem(name, category = DEFAULT_CATEGORY) {
     const trimmed = name.trim();
@@ -63,11 +58,6 @@ export default function App() {
         ...prev,
         { id: Date.now(), name: trimmed, bought: false, category, active: true },
       ]);
-    }
-
-    // Поддерживаем библиотеку (без дубликатов, без учёта регистра)
-    if (!library.some((p) => p.trim().toLowerCase() === norm)) {
-      setLibrary((prev) => [...prev, trimmed]);
     }
   }
 
@@ -117,15 +107,6 @@ export default function App() {
         },
       ];
     });
-
-    if (shouldBeActive) {
-      setLibrary((prev) => {
-        if (prev.some((p) => p.trim().toLowerCase() === norm)) {
-          return prev;
-        }
-        return [...prev, trimmed];
-      });
-    }
   }
 
   function handlePurchase(id) {
@@ -139,18 +120,46 @@ export default function App() {
   function deleteItem(id, name) {
     const updatedItems = items.filter((item) => item.id !== id);
     setItems(updatedItems);
-
-    // Удаляем из библиотеки
-    setLibrary((prev) => prev.filter((product) => product !== name));
   }
-  // сохраняем изменения в списке покупок
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.items, JSON.stringify(items));
-  }, [items]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.library, JSON.stringify(library));
-  }, [library]);
+    const itemsRef = ref(rtdb, ITEMS_PATH);
+
+    const unsubscribe = onValue(itemsRef, (snapshot) => {
+      const raw = snapshot.val();
+      let resolved = [];
+
+      if (Array.isArray(raw)) {
+        resolved = raw.map((item) => normalizeItem(item)).filter(Boolean);
+      } else if (raw && typeof raw === "object") {
+        resolved = Object.values(raw)
+          .map((item) => normalizeItem(item))
+          .filter(Boolean);
+      }
+
+      if (resolved.length === 0 && raw === null) {
+        set(itemsRef, []);
+      }
+
+      lastSyncedRef.current = resolved;
+      isSyncedRef.current = true;
+      setItems(resolved);
+    });
+
+    return () => {
+      unsubscribe();
+      isSyncedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isSyncedRef.current) return;
+    if (areItemsEqual(lastSyncedRef.current, items)) return;
+
+    const itemsRef = ref(rtdb, ITEMS_PATH);
+    lastSyncedRef.current = items;
+    set(itemsRef, items);
+  }, [items]);
 
   return (
     <div className="app-wrapper">
@@ -160,7 +169,6 @@ export default function App() {
       <Form
         onAddItem={addItem}
         items={items}
-        library={library}
         defaultCategory={DEFAULT_CATEGORY}
       />
 
