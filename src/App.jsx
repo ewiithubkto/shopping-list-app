@@ -154,7 +154,12 @@ export default function App() {
 
   return (
     <div className="app-wrapper">
-      <h1 className="app-title">🛍️ План покупок</h1>
+      <h1 className="app-title">
+        <span className="app-title__icon" aria-hidden="true">
+          🛍️
+        </span>
+        <span className="app-title__text">План покупок</span>
+      </h1>
       <Form
         onAddItem={addItem}
         items={items}

@@ -222,7 +222,10 @@ export default function List({
           }`}
           onClick={() => setMode(VIEW_MODES.catalog)}
         >
-          📦 Все продукты
+          <span className="view-button__icon" aria-hidden="true">
+            📦
+          </span>
+          <span className="view-button__text">Все продукты</span>
         </button>
         <button
           type="button"
@@ -231,7 +234,10 @@ export default function List({
           }`}
           onClick={() => setMode(VIEW_MODES.shopping)}
         >
-          🛒 Покупки
+          <span className="view-button__icon" aria-hidden="true">
+            🛒
+          </span>
+          <span className="view-button__text">Покупки</span>
         </button>
       </div>
 

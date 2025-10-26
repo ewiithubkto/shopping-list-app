@@ -4,7 +4,7 @@
   gap: var(--space-md);
   padding: var(--space-lg);
   border-radius: var(--radius-lg);
-  background-color: #ffffff;
+  background-color: var(--surface);
   border: 1px solid var(--input-border);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
@@ -22,19 +22,19 @@
 
 .list-input:focus,
 .list-select:focus {
-  outline: 2px solid #7c9dff;
+  outline: 2px solid var(--primary-light);
   outline-offset: 1px;
 }
 
 .list-select {
-  background-color: #f8faff;
+  background-color: var(--surface-alt);
 }
 
 .list-submit {
   padding: 12px 14px;
   border-radius: var(--radius-lg);
   border: none;
-  background: linear-gradient(135deg, #6A83F3, #4A67F5);
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   color: #ffffff;
   font-weight: 600;
   font-size: 1rem;
@@ -47,7 +47,7 @@
 }
 
 .list-submit:focus-visible {
-  outline: 2px solid #3949ff;
+  outline: 2px solid var(--primary-dark);
   outline-offset: 3px;
 }
 
@@ -57,7 +57,7 @@
   padding: var(--space-xs) 0;
   border: 1px solid var(--input-border);
   border-radius: var(--radius-lg);
-  background-color: #ffffff;
+  background-color: var(--surface);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
@@ -76,7 +76,7 @@
 
 .suggestions__item:hover,
 .suggestions__item:focus {
-  background-color: rgba(120, 142, 255, 0.12);
+  background-color: rgba(112, 86, 246, 0.16);
 }
 
 @media (min-width: 640px) {

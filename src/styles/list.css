@@ -8,22 +8,51 @@
   padding: 10px 18px;
   border-radius: var(--radius-md);
   border: 1px solid var(--input-border);
-  background-color: #f6f8ff;
+  background-color: var(--surface-alt);
   font-weight: 600;
   font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.2s ease;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
 }
 
-.view-button.is-active {
+.view-button.is-active,
+.view-button.is-active:hover,
+.view-button.is-active:focus-visible,
+.view-button.is-active:active {
   border-color: var(--primary);
-  background: linear-gradient(135deg, var(--primary), #3650d0);
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   color: #ffffff;
-  box-shadow: 0 6px 20px rgba(74, 103, 245, 0.25);
+  box-shadow: 0 6px 18px rgba(112, 86, 246, 0.2);
+}
+
+.view-button.is-active .view-button__icon,
+.view-button.is-active .view-button__text,
+.view-button.is-active:hover .view-button__icon,
+.view-button.is-active:hover .view-button__text,
+.view-button.is-active:focus-visible .view-button__icon,
+.view-button.is-active:focus-visible .view-button__text,
+.view-button.is-active:active .view-button__icon,
+.view-button.is-active:active .view-button__text {
+  color: #ffffff;
+}
+
+.view-button__icon {
+  display: inline-flex;
+  font-size: 1.1rem;
+}
+
+.view-button__text {
+  display: inline-flex;
+  align-items: center;
 }
 
 .category-section {
-  background-color: #ffffff;
+  background-color: var(--surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--input-border);
   padding: var(--space-sm) var(--space-md);
@@ -51,7 +80,7 @@ input[type="checkbox"] {
 
 .shopping-list li {
   margin: 0;
-  padding: 0;
+  padding: var(--space-xs) 0;
 }
 
 .item,
@@ -104,7 +133,8 @@ input[type="checkbox"] {
   height: 16px;
   margin-right: 4px;
   accent-color: var(--primary);
-  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 1px rgba(40, 29, 63, 0.12);
+  border-radius: 4px;
 }
 
 .item-label {
@@ -136,9 +166,11 @@ input[type="checkbox"] {
   background: transparent;
   cursor: pointer;
   font-size: 16px;
+  color: var(--danger);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.18s ease;
+  transition-delay: 0s;
   padding: 0 !important;
   margin: 0;
   line-height: 1;
@@ -152,10 +184,11 @@ input[type="checkbox"] {
 .item:hover .item-delete {
   opacity: 1;
   pointer-events: auto;
+  transition-delay: 0.1s;
 }
 
 .shopping-section {
-  background-color: #ffffff;
+  background-color: var(--surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--input-border);
   padding: 14px;
@@ -174,7 +207,7 @@ input[type="checkbox"] {
 .shopping-divider {
   list-style: none;
   height: 1px;
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(40, 29, 63, 0.12);
   margin: var(--space-md) 0 0;
 }
 
@@ -194,7 +227,7 @@ input[type="checkbox"] {
   border-radius: var(--radius-lg);
   border: 1px solid var(--danger);
   color: var(--danger);
-  background: #FFD7D7;
+  background: rgba(225, 100, 124, 0.16);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -206,7 +239,7 @@ input[type="checkbox"] {
 }
 
 .shopping-clear:not(:disabled):hover {
-  background: #ffcdd2;
+  background: rgba(225, 100, 124, 0.28);
 }
 
 @media (min-width: 640px) {
@@ -216,7 +249,10 @@ input[type="checkbox"] {
   }
 }
 
-.item-list li + li,
+.item-list li + li {
+  margin-top: var(--space-2xs);
+}
+
 .shopping-list li + li {
   margin-top: var(--space-2xs);
 }
