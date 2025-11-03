@@ -86,7 +86,6 @@ export default function App() {
 
     const resolvedCategory = category || DEFAULT_CATEGORY;
     const normName = normalizeName(trimmedName);
-    const normCategory = normalizeName(resolvedCategory);
 
     const normalizedEntry = normalizeCatalogItem({
       name: trimmedName,
