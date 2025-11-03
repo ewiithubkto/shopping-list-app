@@ -307,9 +307,13 @@ export default function List({
 
       {mode === VIEW_MODES.shopping && (
         <div className="shopping-section">
-          <ul className="shopping-list">
-            {shoppingItems.map(renderShoppingRow)}
-          </ul>
+          {shoppingItems.length === 0 ? (
+            <p className="shopping-empty">Этот список пока пуст</p>
+          ) : (
+            <ul className="shopping-list">
+              {shoppingItems.map(renderShoppingRow)}
+            </ul>
+          )}
         </div>
       )}
     </div>
