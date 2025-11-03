@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import products from "../data/products.json";
+import { getItemKey } from "../utils/items";
 import "../styles/list.css";
 
 const VIEW_MODES = {
-  catalog: "catalog",
+  catalog: "all",
   shopping: "shopping",
 };
 
@@ -35,19 +35,32 @@ function usePrefersReducedMotion() {
 
 export default function List({
   items,
+  catalog = [],
   onDelete,
   onActiveChange,
   onPurchase,
   defaultCategory,
+  activeTab,
+  onTabChange,
 }) {
   const [removingId, setRemovingId] = useState(null);
-  const [mode, setMode] = useState(VIEW_MODES.catalog);
+  const [internalMode, setInternalMode] = useState(VIEW_MODES.catalog);
   const [recentlyAddedIds, setRecentlyAddedIds] = useState(() => new Set());
   const previousIdsRef = useRef(new Set(items.map((item) => item.id)));
   const animationTimeoutsRef = useRef([]);
+  const mode = activeTab ?? internalMode;
   const isShoppingView = mode === VIEW_MODES.shopping;
   const prefersReducedMotion = usePrefersReducedMotion();
   const shouldAnimate = !prefersReducedMotion;
+
+  const changeMode = (nextMode) => {
+    if (onTabChange) {
+      onTabChange(nextMode);
+    }
+    if (activeTab === undefined) {
+      setInternalMode(nextMode);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -129,11 +142,12 @@ export default function List({
 
   const catalogCategories = useMemo(() => {
     const map = new Map();
-    const itemsByName = new Map();
-    const libraryNames = new Set();
+    const itemsByKey = new Map();
+    const libraryKeys = new Set();
 
     items.forEach((item) => {
-      itemsByName.set(item.name.trim().toLowerCase(), item);
+      const key = getItemKey(item.name, item.category, defaultCategory);
+      itemsByKey.set(key, item);
     });
 
     const addToCategory = (category, entry) => {
@@ -142,12 +156,12 @@ export default function List({
       map.get(key).push(entry);
     };
 
-    products.forEach(({ name, category }) => {
-      const normalized = name.trim().toLowerCase();
-      const linkedItem = itemsByName.get(normalized);
-      libraryNames.add(normalized);
+    catalog.forEach(({ name, category }) => {
+      const itemKey = getItemKey(name, category, defaultCategory);
+      const linkedItem = itemsByKey.get(itemKey);
+      libraryKeys.add(itemKey);
 
-      const id = linkedItem ? linkedItem.id : `catalog-${normalized}`;
+      const id = linkedItem ? linkedItem.id : `catalog-${itemKey}`;
 
       addToCategory(category, {
         id,
@@ -160,8 +174,8 @@ export default function List({
     });
 
     items.forEach((item) => {
-      const normalized = item.name.trim().toLowerCase();
-      if (libraryNames.has(normalized)) return;
+      const itemKey = getItemKey(item.name, item.category, defaultCategory);
+      if (libraryKeys.has(itemKey)) return;
 
       addToCategory(item.category, {
         id: item.id,
@@ -179,7 +193,7 @@ export default function List({
         items: categoryItems,
       }))
       .filter(({ items }) => items.length > 0);
-  }, [items, defaultCategory]);
+  }, [items, catalog, defaultCategory]);
 
   const shoppingItems = useMemo(
     () =>
@@ -220,7 +234,7 @@ export default function List({
           className={`view-button ${
             mode === VIEW_MODES.catalog ? "is-active" : ""
           }`}
-          onClick={() => setMode(VIEW_MODES.catalog)}
+          onClick={() => changeMode(VIEW_MODES.catalog)}
         >
           <span className="view-button__icon" aria-hidden="true">
             📦
@@ -232,7 +246,7 @@ export default function List({
           className={`view-button ${
             mode === VIEW_MODES.shopping ? "is-active" : ""
           }`}
-          onClick={() => setMode(VIEW_MODES.shopping)}
+          onClick={() => changeMode(VIEW_MODES.shopping)}
         >
           <span className="view-button__icon" aria-hidden="true">
             🛒
@@ -271,10 +285,15 @@ export default function List({
                       />
                       {item.name}
                     </label>
-                    {!isShoppingView && !item.bought && (
+                    {!isShoppingView && (!item.bought || !item.linkedItem) && (
                       <button
+                        type="button"
                         className="item-delete"
-                        onClick={() => onDelete(item.id, item.name)}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onDelete(item);
+                        }}
                       >
                         ❌
                       </button>

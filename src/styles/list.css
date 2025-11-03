@@ -187,6 +187,13 @@ input[type="checkbox"] {
   transition-delay: 0.1s;
 }
 
+@media (hover: none) {
+  .item-delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .shopping-section {
   background-color: var(--surface);
   border-radius: var(--radius-lg);

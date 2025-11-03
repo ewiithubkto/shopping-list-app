@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import products from "../data/products.json";
+import { normalizeName } from "../utils/items";
 import "../styles/form.css";
 
-const CATEGORY_OPTIONS = [
+const BASE_CATEGORY_OPTIONS = [
   "Молочное",
   "Овощи",
   "Фрукты / орехи",
@@ -14,15 +14,6 @@ const CATEGORY_OPTIONS = [
   "DM",
   "Другое",
 ];
-
-function getCategoryByName(name) {
-  const normalized = name.trim().toLowerCase();
-  const match = products.find(
-    (product) => product.name.trim().toLowerCase() === normalized
-  );
-
-  return match?.category;
-}
 
 const MAX_SUGGESTIONS = 5;
 
@@ -41,9 +32,42 @@ function matchesQuery(name, query) {
     });
 }
 
-export default function Form({ onAddItem, items, defaultCategory }) {
+export default function Form({
+  onAddItem,
+  items,
+  catalog = [],
+  defaultCategory,
+}) {
   const [text, setText] = useState("");
   const [category, setCategory] = useState("");
+  const categoriesByName = useMemo(() => {
+    const map = new Map();
+    catalog.forEach(({ name, category: cat }) => {
+      const normalized = normalizeName(name);
+      if (!map.has(normalized)) {
+        map.set(normalized, cat);
+      }
+    });
+    return map;
+  }, [catalog]);
+
+  const categoryOptions = useMemo(() => {
+    const known = new Set(BASE_CATEGORY_OPTIONS);
+    const extended = [...BASE_CATEGORY_OPTIONS];
+
+    catalog.forEach(({ category: cat }) => {
+      const value = (cat ?? "").toString().trim();
+      if (!value) return;
+      if (known.has(value)) return;
+      known.add(value);
+      extended.push(value);
+    });
+
+    return extended;
+  }, [catalog]);
+
+  const getCategoryByName = (name) =>
+    categoriesByName.get(normalizeName(name));
 
   function handleChange(e) {
     const value = e.target.value;
@@ -57,8 +81,8 @@ export default function Form({ onAddItem, items, defaultCategory }) {
     const seen = new Set();
     const matches = [];
 
-    for (const { name } of products) {
-      const normalizedName = name.trim().toLowerCase();
+    for (const { name } of catalog) {
+      const normalizedName = normalizeName(name);
       if (seen.has(normalizedName)) continue;
 
       if (matchesQuery(name, query)) {
@@ -70,7 +94,7 @@ export default function Form({ onAddItem, items, defaultCategory }) {
     }
 
     return matches;
-  }, [text, products]);
+  }, [text, catalog]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -81,7 +105,7 @@ export default function Form({ onAddItem, items, defaultCategory }) {
       category || getCategoryByName(trimmed) || defaultCategory;
 
     const duplicate = items.some(
-      (item) => item.name.trim().toLowerCase() === trimmed.toLowerCase()
+      (item) => normalizeName(item.name) === normalizeName(trimmed)
     );
     if (duplicate) return;
 
@@ -94,7 +118,7 @@ export default function Form({ onAddItem, items, defaultCategory }) {
     const resolvedCategory =
       getCategoryByName(name) ||
       items.find(
-        (item) => item.name.trim().toLowerCase() === name.trim().toLowerCase()
+        (item) => normalizeName(item.name) === normalizeName(name)
       )?.category ||
       defaultCategory;
 
@@ -120,7 +144,7 @@ export default function Form({ onAddItem, items, defaultCategory }) {
         <option value="" disabled hidden>
           Выберите категорию
         </option>
-        {CATEGORY_OPTIONS.map((option) => (
+        {categoryOptions.map((option) => (
           <option key={option} value={option}>
             {option}
           </option>
