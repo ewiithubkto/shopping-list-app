@@ -227,12 +227,16 @@
 
 .suggestions {
   list-style: none;
-  margin: 0;
+  margin: var(--space-xs) 0 0;
   padding: var(--space-xs) 0;
   border: 1px solid var(--input-border);
   border-radius: var(--radius-lg);
   background-color: var(--surface);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.suggestions--inline {
+  margin-top: var(--space-xs);
 }
 
 .suggestions__item {

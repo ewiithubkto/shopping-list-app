@@ -201,6 +201,21 @@ export default function Form({
         onChange={handleChange}
         onFocus={() => setIsExpanded(true)}
       />
+      {isExpanded && suggestions.length > 0 && (
+        <ul className="suggestions suggestions--inline">
+          {suggestions.map((sug) => (
+            <li key={sug}>
+              <button
+                type="button"
+                className="suggestions__item"
+                onClick={() => handleSuggestionClick(sug)}
+              >
+                {sug}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {isExpanded && (
         <>
           <select
@@ -270,23 +285,6 @@ export default function Form({
             </button>
           </div>
         </>
-      )}
-
-      {/* показываем подсказки */}
-      {isExpanded && suggestions.length > 0 && (
-        <ul className="suggestions">
-          {suggestions.map((sug) => (
-            <li key={sug}>
-              <button
-                type="button"
-                className="suggestions__item"
-                onClick={() => handleSuggestionClick(sug)}
-              >
-                {sug}
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
     </form>
   );
