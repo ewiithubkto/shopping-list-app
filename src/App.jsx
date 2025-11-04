@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { onValue, push, ref, remove, set } from "firebase/database";
 import Form from "./components/Form";
 import List from "./components/List";
@@ -15,6 +15,7 @@ const NORMALIZED_CURRENT_USER_EMAIL =
 
 const CATALOG_PATH = "shopping/catalog";
 const LISTS_PATH = "lists";
+const EMPTY_ITEMS = Object.freeze([]);
 
 function normalizeItem(item) {
   if (!item) return null;
@@ -125,7 +126,7 @@ function areItemsEqual(first, second) {
 }
 
 export default function App() {
-  const [items, setItems] = useState([]);
+  const [itemsState, setItemsState] = useState({ listId: null, data: [] });
   const [catalog, setCatalog] = useState([]);
   const [activeTab, setActiveTab] = useState("all");
   const [lists, setLists] = useState([]);
@@ -140,6 +141,12 @@ export default function App() {
 
   const activeList =
     lists.find((list) => list.id === activeListId) ?? null;
+  const items = useMemo(() => {
+    if (itemsState.listId !== activeListId) {
+      return EMPTY_ITEMS;
+    }
+    return itemsState.data;
+  }, [itemsState, activeListId]);
   const isSyncedRef = useRef(false);
   const lastSyncedRef = useRef([]);
   const isCatalogSyncedRef = useRef(false);
@@ -147,6 +154,33 @@ export default function App() {
   const hasSeededCatalogRef = useRef(false);
   const hasSeededDefaultListRef = useRef(false);
   const currentItemsListIdRef = useRef(null);
+
+  function updateActiveListItems(updater) {
+    if (!activeListId) return;
+
+    setItemsState((prev) => {
+      const prevData =
+        prev.listId === activeListId ? prev.data : [];
+      const nextData =
+        typeof updater === "function" ? updater(prevData) : updater;
+
+      if (!Array.isArray(nextData)) {
+        return prev;
+      }
+
+      if (
+        prev.listId === activeListId &&
+        (nextData === prevData || areItemsEqual(prevData, nextData))
+      ) {
+        return prev;
+      }
+
+      return {
+        listId: activeListId,
+        data: nextData,
+      };
+    });
+  }
 
   useEffect(() => {
     if (!activeList) {
@@ -215,7 +249,7 @@ export default function App() {
 
     if (!activeListId) return;
 
-    setItems((prev) => {
+    updateActiveListItems((prev) => {
       const next = prev.filter((item) => {
         if (linkedItemId && item.id === linkedItemId) {
           return false;
@@ -365,7 +399,10 @@ export default function App() {
 
     setIsRenamingList(false);
     setRenameListValue("");
-    setItems([]);
+    setItemsState({ listId: null, data: [] });
+    isSyncedRef.current = false;
+    lastSyncedRef.current = [];
+    currentItemsListIdRef.current = null;
     setLists((prev) => {
       const next = prev.filter((list) => list.id !== activeListId);
       const nextActive = next[0]?.id ?? null;
@@ -398,7 +435,7 @@ export default function App() {
         !existing.active ||
         existing.category !== resolvedCategory
       ) {
-        setItems((prev) =>
+        updateActiveListItems((prev) =>
           prev.map((it) =>
             it.id === existing.id
               ? {
@@ -414,7 +451,7 @@ export default function App() {
       return;
     }
 
-    setItems((prev) => [
+    updateActiveListItems((prev) => [
       ...prev,
       {
         id: Date.now(),
@@ -439,7 +476,7 @@ export default function App() {
       upsertCatalogEntry(trimmed, resolvedCategory);
     }
 
-    setItems((prev) => {
+    updateActiveListItems((prev) => {
       const existing =
         prev.find(
           (it) =>
@@ -486,7 +523,7 @@ export default function App() {
 
   function handlePurchase(id) {
     if (!activeListId) return;
-    setItems((prevItems) =>
+    updateActiveListItems((prevItems) =>
       prevItems.map((item) =>
         item.id === id ? { ...item, bought: true, active: false } : item
       )
@@ -673,18 +710,20 @@ export default function App() {
       isSyncedRef.current = false;
       lastSyncedRef.current = [];
       currentItemsListIdRef.current = null;
-      setItems([]);
+      setItemsState({ listId: null, data: [] });
       return;
     }
 
-    if (currentItemsListIdRef.current !== activeListId) {
+    const listId = activeListId;
+
+    if (currentItemsListIdRef.current !== listId) {
       isSyncedRef.current = false;
       lastSyncedRef.current = [];
-      setItems([]);
+      setItemsState({ listId, data: [] });
     }
 
-    currentItemsListIdRef.current = activeListId;
-    const itemsRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/items`);
+    currentItemsListIdRef.current = listId;
+    const itemsRef = ref(rtdb, `${LISTS_PATH}/${listId}/items`);
 
     const unsubscribe = onValue(itemsRef, (snapshot) => {
       const raw = snapshot.val();
@@ -704,24 +743,28 @@ export default function App() {
 
       lastSyncedRef.current = resolved;
       isSyncedRef.current = true;
-      setItems(resolved);
+      setItemsState({ listId, data: resolved });
     });
 
     return () => {
       unsubscribe();
-      isSyncedRef.current = false;
+      if (currentItemsListIdRef.current === listId) {
+        currentItemsListIdRef.current = null;
+        isSyncedRef.current = false;
+      }
     };
   }, [activeListId]);
 
   useEffect(() => {
     if (!activeListId) return;
+    if (itemsState.listId !== activeListId) return;
     if (!isSyncedRef.current) return;
     if (areItemsEqual(lastSyncedRef.current, items)) return;
 
     const itemsRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/items`);
     lastSyncedRef.current = items;
     set(itemsRef, itemsArrayToRecord(items));
-  }, [items, activeListId]);
+  }, [items, itemsState.listId, activeListId]);
 
   const isShoppingTab = activeTab === "shopping";
 
@@ -762,62 +805,73 @@ export default function App() {
             </form>
           ) : (
             <div className="app-title-row">
-              <h1 className="app-title">
-                {isShoppingTab
-                  ? activeList?.name || "План покупок"
-                  : "План покупок"}
-              </h1>
-              {isShoppingTab && activeList && (
-                <div className="app-title-actions">
-                  <button
-                    type="button"
-                    className="app-title-action"
-                    onClick={() => {
-                      setRenameListValue(activeList.name || "");
-                      setIsRenamingList(true);
-                    }}
-                    disabled={isRenamingSubmitting}
-                    title="Переименовать список"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    type="button"
-                    className="app-title-action"
-                    onClick={handleDeleteList}
-                    title="Удалить список"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              )}
+              <div className="app-title-content">
+                <h1 className="app-title">
+                  {isShoppingTab
+                    ? activeList?.name || "План покупок"
+                    : "План покупок"}
+                </h1>
+                {lists.length > 0 && (
+                  <div className="app-title-controls">
+                    <label className="app-title-select">
+                      <select
+                        className="app-list-select app-list-select--inline"
+                        value={activeListId ?? ""}
+                        onChange={(event) => {
+                          setActiveListId(event.target.value);
+                        }}
+                        aria-label="Выбрать список"
+                        required
+                      >
+                        <option value="" disabled hidden>
+                          Выбрать
+                        </option>
+                        {lists.map((list) => (
+                          <option key={list.id} value={list.id}>
+                            {list.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {isShoppingTab && activeList && (
+                      <div className="app-title-actions">
+                        <button
+                          type="button"
+                          className="app-title-action"
+                          onClick={() => {
+                            setRenameListValue(activeList.name || "");
+                            setIsRenamingList(true);
+                          }}
+                          disabled={isRenamingSubmitting}
+                          title="Переименовать список"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          className="app-title-action"
+                          onClick={handleDeleteList}
+                          title="Удалить список"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
         {!isShoppingTab && (
           <div className="app-list-controls">
-            {lists.length > 0 && (
-              <select
-                className="app-list-select"
-                value={activeListId ?? (lists[0]?.id ?? "")}
-                onChange={(event) => {
-                  setActiveListId(event.target.value);
-                }}
-              >
-                {lists.map((list) => (
-                  <option key={list.id} value={list.id}>
-                    {list.name}
-                  </option>
-                ))}
-              </select>
-            )}
             <button
               type="button"
               className="app-list-create-button"
               onClick={() => setIsCreatingList((prev) => !prev)}
               disabled={isSubmittingList}
             >
-              ➕ Новый список
+              Новый список
             </button>
           </div>
         )}
