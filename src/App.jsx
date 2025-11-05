@@ -2,20 +2,66 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { onValue, push, ref, remove, set } from "firebase/database";
 import Form from "./components/Form";
 import List from "./components/List";
+import UserSetup from "./components/UserSetup";
 import baseCatalog from "./data/products.json";
 import { rtdb } from "./firebase";
 import { normalizeName } from "./utils/items";
+import { isValidEmail } from "./utils/validation";
 import "./styles/app.css";
 
 const DEFAULT_CATEGORY = "Другое";
-const CURRENT_USER_EMAIL = "elena@example.com";
-
-const NORMALIZED_CURRENT_USER_EMAIL =
-  CURRENT_USER_EMAIL.trim().toLowerCase();
-
 const CATALOG_PATH = "shopping/catalog";
 const LISTS_PATH = "lists";
 const EMPTY_ITEMS = Object.freeze([]);
+const USER_STORAGE_KEY = "shoppingListApp.currentUser";
+
+function normalizeUser(raw) {
+  if (!raw || typeof raw !== "object") return null;
+
+  const name = (raw.name ?? "").toString().trim();
+  const email = (raw.email ?? "").toString().trim();
+
+  if (!name || !email) return null;
+  if (!isValidEmail(email)) return null;
+
+  return {
+    name,
+    email,
+  };
+}
+
+function loadStoredUser() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(USER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return normalizeUser(parsed);
+  } catch (error) {
+    console.warn("Failed to load stored user", error);
+    return null;
+  }
+}
+
+function persistUser(user) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const normalized = normalizeUser(user);
+    if (!normalized) {
+      window.localStorage.removeItem(USER_STORAGE_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(
+      USER_STORAGE_KEY,
+      JSON.stringify(normalized)
+    );
+  } catch (error) {
+    console.warn("Failed to persist user", error);
+  }
+}
 
 function normalizeItem(item) {
   if (!item) return null;
@@ -44,7 +90,7 @@ function normalizeCatalogItem(item) {
   };
 }
 
-function normalizeListEntry(id, value) {
+function normalizeListEntry(id, value, currentUser) {
   if (!value) return null;
 
   const name = (value.name ?? "").toString().trim();
@@ -60,9 +106,11 @@ function normalizeListEntry(id, value) {
       }
     });
 
-  const currentKey = NORMALIZED_CURRENT_USER_EMAIL;
-  if (currentKey && !memberSet.has(currentKey)) {
-    memberSet.set(currentKey, CURRENT_USER_EMAIL);
+  const currentEmail = (currentUser?.email ?? "").toString().trim();
+  const normalizedCurrentEmail = currentEmail.toLowerCase();
+
+  if (normalizedCurrentEmail && !memberSet.has(normalizedCurrentEmail)) {
+    memberSet.set(normalizedCurrentEmail, currentEmail);
   }
 
   const members = Array.from(memberSet.values());
@@ -126,6 +174,7 @@ function areItemsEqual(first, second) {
 }
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(() => loadStoredUser());
   const [itemsState, setItemsState] = useState({ listId: null, data: [] });
   const [catalog, setCatalog] = useState([]);
   const [activeTab, setActiveTab] = useState("all");
@@ -138,6 +187,9 @@ export default function App() {
   const [isRenamingList, setIsRenamingList] = useState(false);
   const [renameListValue, setRenameListValue] = useState("");
   const [isRenamingSubmitting, setIsRenamingSubmitting] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [isInvitingMember, setIsInvitingMember] = useState(false);
 
   const activeList =
     lists.find((list) => list.id === activeListId) ?? null;
@@ -154,6 +206,14 @@ export default function App() {
   const hasSeededCatalogRef = useRef(false);
   const hasSeededDefaultListRef = useRef(false);
   const currentItemsListIdRef = useRef(null);
+  const normalizedCurrentUserEmail = useMemo(() => {
+    const email = (currentUser?.email ?? "").toString().trim();
+    return email.toLowerCase();
+  }, [currentUser]);
+
+  useEffect(() => {
+    persistUser(currentUser);
+  }, [currentUser]);
 
   function updateActiveListItems(updater) {
     if (!activeListId) return;
@@ -182,6 +242,20 @@ export default function App() {
     });
   }
 
+  function handleUserSetupSubmit(user) {
+    const normalized = normalizeUser(user);
+    if (!normalized) return;
+
+    setCurrentUser(normalized);
+    hasSeededDefaultListRef.current = false;
+    setLists([]);
+    setActiveListId(null);
+    setItemsState({ listId: null, data: [] });
+    isSyncedRef.current = false;
+    lastSyncedRef.current = [];
+    currentItemsListIdRef.current = null;
+  }
+
   useEffect(() => {
     if (!activeList) {
       setIsRenamingList(false);
@@ -190,6 +264,12 @@ export default function App() {
     }
     setRenameListValue(activeList.name || "");
   }, [activeListId, activeList]);
+
+  useEffect(() => {
+    setInviteEmail("");
+    setInviteError("");
+    setIsInvitingMember(false);
+  }, [activeListId]);
 
   function upsertCatalogEntry(name, category = DEFAULT_CATEGORY) {
     const trimmedName = name.trim();
@@ -283,6 +363,7 @@ export default function App() {
   async function handleCreateListSubmit(event) {
     event.preventDefault();
     if (isSubmittingList) return;
+    if (!currentUser || !currentUser.email) return;
 
     const trimmedName = newListName.trim();
     if (!trimmedName) return;
@@ -290,13 +371,14 @@ export default function App() {
     const additionalMembers = newListMembers
       .split(",")
       .map((email) => email.trim())
-      .filter(Boolean);
+      .filter((email) => isValidEmail(email));
 
     const uniqueMembers = [];
     const seenMembers = new Set();
-    [CURRENT_USER_EMAIL, ...additionalMembers].forEach((email) => {
+    [currentUser.email, ...additionalMembers].forEach((email) => {
       const normalized = email.trim();
       if (!normalized) return;
+      if (!isValidEmail(normalized)) return;
       const key = normalized.toLowerCase();
       if (seenMembers.has(key)) return;
       seenMembers.add(key);
@@ -316,7 +398,7 @@ export default function App() {
       await set(newListRef, payload);
       const newId = newListRef.key;
 
-      const normalized = normalizeListEntry(newId, payload);
+      const normalized = normalizeListEntry(newId, payload, currentUser);
       if (normalized) {
         setLists((prev) => {
           const exists = prev.some((list) => list.id === normalized.id);
@@ -409,6 +491,54 @@ export default function App() {
       setActiveListId(nextActive);
       return next;
     });
+  }
+
+  async function handleInviteSubmit(event) {
+    event.preventDefault();
+    if (!activeListId || !activeList) return;
+
+    const trimmed = inviteEmail.trim();
+    if (!trimmed) {
+      setInviteError("Введите email участника.");
+      return;
+    }
+    if (!isValidEmail(trimmed)) {
+      setInviteError("Проверьте формат email.");
+      return;
+    }
+
+    const normalized = trimmed.toLowerCase();
+    const existingMembers = Array.isArray(activeList.members)
+      ? activeList.members
+      : [];
+    const alreadyExists = existingMembers.some(
+      (member) => (member ?? "").toString().trim().toLowerCase() === normalized
+    );
+
+    if (alreadyExists) {
+      setInviteError("Этот участник уже в списке.");
+      return;
+    }
+
+    const nextMembers = [...existingMembers, trimmed];
+
+    try {
+      setIsInvitingMember(true);
+      setInviteError("");
+      const membersRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/members`);
+      await set(membersRef, nextMembers);
+      setLists((prev) =>
+        prev.map((list) =>
+          list.id === activeListId ? { ...list, members: nextMembers } : list
+        )
+      );
+      setInviteEmail("");
+    } catch (error) {
+      console.error("Failed to invite member", error);
+      setInviteError("Не удалось пригласить участника. Попробуйте ещё раз.");
+    } finally {
+      setIsInvitingMember(false);
+    }
   }
 
   function addItem(name, category = DEFAULT_CATEGORY) {
@@ -531,20 +661,40 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!currentUser || !currentUser.email) {
+      setLists([]);
+      setActiveListId(null);
+      return undefined;
+    }
+
     const listsRef = ref(rtdb, LISTS_PATH);
 
     const processEntry = (key, value) => {
       if (!value) return null;
 
-      const normalized = normalizeListEntry(key, value);
-      if (!normalized) return null;
-
       const rawMembers = Array.isArray(value.members) ? value.members : [];
-      const hasCurrentInRaw = rawMembers.some(
-        (member) => (member ?? "").toString().trim().toLowerCase() === NORMALIZED_CURRENT_USER_EMAIL
-      );
+      const normalizedRawMembers = rawMembers
+        .map((member) => (member ?? "").toString().trim())
+        .filter(Boolean);
+
+      const hasCurrentInRaw =
+        normalizedCurrentUserEmail &&
+        normalizedRawMembers.some(
+          (member) => member.toLowerCase() === normalizedCurrentUserEmail
+        );
 
       if (!hasCurrentInRaw) {
+        return null;
+      }
+
+      const normalized = normalizeListEntry(key, value, currentUser);
+      if (!normalized) return null;
+
+      const shouldUpdateMembers =
+        normalized.members.length !== normalizedRawMembers.length ||
+        normalized.members.some((member, index) => member !== normalizedRawMembers[index]);
+
+      if (shouldUpdateMembers) {
         const membersRef = ref(rtdb, `${LISTS_PATH}/${key}/members`);
         set(membersRef, normalized.members);
       }
@@ -595,7 +745,7 @@ export default function App() {
 
         const payload = {
           name: "Семейный список",
-          members: [CURRENT_USER_EMAIL],
+          members: [currentUser.email],
           items: {},
         };
 
@@ -604,7 +754,7 @@ export default function App() {
           .then(() => {
             const newId = defaultListRef.key;
             if (newId) {
-              const normalized = normalizeListEntry(newId, payload);
+              const normalized = normalizeListEntry(newId, payload, currentUser);
               if (normalized) {
                 setLists((prev) => {
                   if (prev.some((list) => list.id === normalized.id)) {
@@ -626,7 +776,7 @@ export default function App() {
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [currentUser, normalizedCurrentUserEmail]);
 
   useEffect(() => {
     if (!lists || lists.length === 0) {
@@ -766,11 +916,31 @@ export default function App() {
     set(itemsRef, itemsArrayToRecord(items));
   }, [items, itemsState.listId, activeListId]);
 
+  if (!currentUser) {
+    return (
+      <div className="app-wrapper">
+        <UserSetup onSubmit={handleUserSetupSubmit} />
+      </div>
+    );
+  }
+
   const isShoppingTab = activeTab === "shopping";
+  const activeMembers = Array.isArray(activeList?.members)
+    ? activeList.members
+    : [];
+  const trimmedInviteEmail = inviteEmail.trim();
+  const canSubmitInvite = isValidEmail(trimmedInviteEmail);
 
   return (
     <div className="app-wrapper">
       <div className="app-title-card">
+        <div className="app-user-bar">
+          <div className="app-user-meta">
+            <span className="app-user-label">Текущий пользователь</span>
+            <span className="app-user-name">{currentUser.name}</span>
+          </div>
+          <span className="app-user-email">{currentUser.email}</span>
+        </div>
         <div className={`app-title-header${isShoppingTab ? "" : " is-catalog"}`}>
           {isShoppingTab && isRenamingList && activeList ? (
             <form
@@ -863,6 +1033,66 @@ export default function App() {
             </div>
           )}
         </div>
+        {activeList && (
+          <div className="app-members-panel">
+            <div className="app-members-header">
+              <span className="app-members-title">Участники</span>
+              <span className="app-members-count">{activeMembers.length}</span>
+            </div>
+            <div className="app-members-list">
+              {activeMembers.map((member) => {
+                const normalizedMember = (member ?? "").toString().trim();
+                if (!normalizedMember) return null;
+                const isCurrent =
+                  normalizedMember.toLowerCase() === normalizedCurrentUserEmail;
+                const displayText = isCurrent
+                  ? `Вы • ${normalizedMember}`
+                  : normalizedMember;
+                return (
+                  <span
+                    key={normalizedMember}
+                    className={`app-member-chip${
+                      isCurrent ? " app-member-chip--current" : ""
+                    }`}
+                  >
+                    {displayText}
+                  </span>
+                );
+              })}
+            </div>
+            <form
+              className="app-members-form"
+              onSubmit={handleInviteSubmit}
+            >
+              <input
+                type="email"
+                className="app-members-input"
+                value={inviteEmail}
+                onChange={(event) => {
+                  setInviteEmail(event.target.value);
+                  if (inviteError) {
+                    setInviteError("");
+                  }
+                }}
+                placeholder="Email участника"
+                aria-label="Email участника"
+                disabled={isInvitingMember}
+              />
+              <button
+                type="submit"
+                className="app-members-submit"
+                disabled={!canSubmitInvite || isInvitingMember}
+              >
+                Пригласить
+              </button>
+            </form>
+            {inviteError && (
+              <p className="app-members-error" role="alert">
+                {inviteError}
+              </p>
+            )}
+          </div>
+        )}
         {!isShoppingTab && (
           <div className="app-list-controls">
             <button
