@@ -12,8 +12,21 @@ import "./styles/app.css";
 const DEFAULT_CATEGORY = "Другое";
 const CATALOG_PATH = "shopping/catalog";
 const LISTS_PATH = "lists";
+const USERS_PATH = "users";
 const EMPTY_ITEMS = Object.freeze([]);
 const USER_STORAGE_KEY = "shoppingListApp.currentUser";
+
+function normalizeEmailValue(value) {
+  return (value ?? "").toString().trim().toLowerCase();
+}
+
+function encodeEmailKey(value) {
+  return normalizeEmailValue(value).replace(/\./g, ",");
+}
+
+function decodeEmailKey(key) {
+  return (key ?? "").toString().trim().replace(/,/g, ".");
+}
 
 function normalizeUser(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -100,14 +113,15 @@ function normalizeListEntry(id, value, currentUser) {
     .map((member) => (member ?? "").toString().trim())
     .filter(Boolean)
     .forEach((member) => {
-      const key = member.toLowerCase();
+      const key = normalizeEmailValue(member);
+      if (!key) return;
       if (!memberSet.has(key)) {
         memberSet.set(key, member);
       }
     });
 
   const currentEmail = (currentUser?.email ?? "").toString().trim();
-  const normalizedCurrentEmail = currentEmail.toLowerCase();
+  const normalizedCurrentEmail = normalizeEmailValue(currentEmail);
 
   if (normalizedCurrentEmail && !memberSet.has(normalizedCurrentEmail)) {
     memberSet.set(normalizedCurrentEmail, currentEmail);
@@ -190,6 +204,7 @@ export default function App() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteError, setInviteError] = useState("");
   const [isInvitingMember, setIsInvitingMember] = useState(false);
+  const [userDirectory, setUserDirectory] = useState({});
 
   const activeList =
     lists.find((list) => list.id === activeListId) ?? null;
@@ -206,6 +221,7 @@ export default function App() {
   const hasSeededCatalogRef = useRef(false);
   const hasSeededDefaultListRef = useRef(false);
   const currentItemsListIdRef = useRef(null);
+  const lastSyncedUserProfileRef = useRef({ email: null, name: null });
   const normalizedCurrentUserEmail = useMemo(() => {
     const email = (currentUser?.email ?? "").toString().trim();
     return email.toLowerCase();
@@ -213,6 +229,38 @@ export default function App() {
 
   useEffect(() => {
     persistUser(currentUser);
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const trimmedEmail = (currentUser.email ?? "").toString().trim();
+    const trimmedName = (currentUser.name ?? "").toString().trim();
+    const normalizedEmail = normalizeEmailValue(trimmedEmail);
+    if (!normalizedEmail || !isValidEmail(trimmedEmail) || !trimmedName) {
+      return;
+    }
+
+    const lastSynced = lastSyncedUserProfileRef.current;
+    if (
+      lastSynced.email === trimmedEmail &&
+      lastSynced.name === trimmedName
+    ) {
+      return;
+    }
+
+    lastSyncedUserProfileRef.current = {
+      email: trimmedEmail,
+      name: trimmedName,
+    };
+
+    const userRef = ref(rtdb, `${USERS_PATH}/${encodeEmailKey(trimmedEmail)}`);
+    set(userRef, {
+      email: trimmedEmail,
+      name: trimmedName,
+      updatedAt: Date.now(),
+    }).catch((error) => {
+      console.error("Failed to sync user profile", error);
+    });
   }, [currentUser]);
 
   function updateActiveListItems(updater) {
@@ -373,9 +421,11 @@ export default function App() {
       .map((email) => email.trim())
       .filter((email) => isValidEmail(email));
 
+    const primaryEmail = (currentUser.email ?? "").toString().trim();
+
     const uniqueMembers = [];
     const seenMembers = new Set();
-    [currentUser.email, ...additionalMembers].forEach((email) => {
+    [primaryEmail, ...additionalMembers].forEach((email) => {
       const normalized = email.trim();
       if (!normalized) return;
       if (!isValidEmail(normalized)) return;
@@ -507,12 +557,12 @@ export default function App() {
       return;
     }
 
-    const normalized = trimmed.toLowerCase();
+    const normalized = normalizeEmailValue(trimmed);
     const existingMembers = Array.isArray(activeList.members)
       ? activeList.members
       : [];
     const alreadyExists = existingMembers.some(
-      (member) => (member ?? "").toString().trim().toLowerCase() === normalized
+      (member) => normalizeEmailValue(member) === normalized
     );
 
     if (alreadyExists) {
@@ -546,8 +596,9 @@ export default function App() {
 
     const trimmed = (memberEmail ?? "").toString().trim();
     if (!trimmed) return;
+    const normalizedTarget = normalizeEmailValue(trimmed);
     if (
-      trimmed.toLowerCase() === normalizedCurrentUserEmail ||
+      normalizedTarget === normalizedCurrentUserEmail ||
       !isValidEmail(trimmed)
     ) {
       return;
@@ -558,7 +609,7 @@ export default function App() {
       : [];
     const nextMembers = existingMembers.filter(
       (member) =>
-        (member ?? "").toString().trim().toLowerCase() !== trimmed.toLowerCase()
+        normalizeEmailValue(member) !== normalizedTarget
     );
 
     if (nextMembers.length === existingMembers.length) {
@@ -713,14 +764,17 @@ export default function App() {
       if (!value) return null;
 
       const rawMembers = Array.isArray(value.members) ? value.members : [];
-      const normalizedRawMembers = rawMembers
+      const trimmedRawMembers = rawMembers
         .map((member) => (member ?? "").toString().trim())
+        .filter(Boolean);
+      const normalizedRawMembers = trimmedRawMembers
+        .map((member) => normalizeEmailValue(member))
         .filter(Boolean);
 
       const hasCurrentInRaw =
         normalizedCurrentUserEmail &&
         normalizedRawMembers.some(
-          (member) => member.toLowerCase() === normalizedCurrentUserEmail
+          (member) => member === normalizedCurrentUserEmail
         );
 
       if (!hasCurrentInRaw) {
@@ -731,8 +785,11 @@ export default function App() {
       if (!normalized) return null;
 
       const shouldUpdateMembers =
-        normalized.members.length !== normalizedRawMembers.length ||
-        normalized.members.some((member, index) => member !== normalizedRawMembers[index]);
+        normalized.members.length !== trimmedRawMembers.length ||
+        normalized.members.some(
+          (member, index) =>
+            (member ?? "").toString().trim() !== trimmedRawMembers[index]
+        );
 
       if (shouldUpdateMembers) {
         const membersRef = ref(rtdb, `${LISTS_PATH}/${key}/members`);
@@ -785,7 +842,7 @@ export default function App() {
 
         const payload = {
           name: "Семейный список",
-          members: [currentUser.email],
+          members: [(currentUser.email ?? "").toString().trim()],
           items: {},
         };
 
@@ -956,6 +1013,45 @@ export default function App() {
     set(itemsRef, itemsArrayToRecord(items));
   }, [items, itemsState.listId, activeListId]);
 
+  useEffect(() => {
+    const usersRef = ref(rtdb, USERS_PATH);
+
+    const unsubscribe = onValue(usersRef, (snapshot) => {
+      const raw = snapshot.val();
+      if (!raw) {
+        setUserDirectory({});
+        return;
+      }
+
+      const entries = Array.isArray(raw)
+        ? raw.entries()
+        : Object.entries(raw);
+      const directory = {};
+
+      for (const [key, value] of entries) {
+        if (!value || typeof value !== "object") continue;
+        const rawEmail =
+          (value.email ?? decodeEmailKey(key))?.toString().trim();
+        const rawName = (value.name ?? value.displayName ?? "")
+          .toString()
+          .trim();
+        if (!isValidEmail(rawEmail)) continue;
+
+        const normalizedEmail = normalizeEmailValue(rawEmail);
+        directory[normalizedEmail] = {
+          email: rawEmail,
+          name: rawName,
+        };
+      }
+
+      setUserDirectory(directory);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   if (!currentUser) {
     return (
       <div className="app-wrapper">
@@ -970,6 +1066,43 @@ export default function App() {
     : [];
   const trimmedInviteEmail = inviteEmail.trim();
   const canSubmitInvite = isValidEmail(trimmedInviteEmail);
+  const memberEntries = useMemo(() => {
+    if (!Array.isArray(activeMembers) || activeMembers.length === 0) {
+      return [];
+    }
+
+    return activeMembers
+      .map((member) => {
+        const trimmed = (member ?? "").toString().trim();
+        if (!trimmed) return null;
+        const normalizedEmail = normalizeEmailValue(trimmed);
+        if (!normalizedEmail) return null;
+
+        const profile = userDirectory[normalizedEmail] ?? null;
+        const profileName = (profile?.name ?? "").toString().trim();
+        const profileEmail = (profile?.email ?? trimmed).toString().trim();
+        const hasName = Boolean(profileName);
+        const isCurrent =
+          normalizedEmail === normalizedCurrentUserEmail;
+
+        const displayLabel = hasName
+          ? profileName
+          : `${profileEmail} (ожидает подключения)`;
+
+        const label = isCurrent
+          ? `Вы • ${hasName ? profileName : profileEmail}`
+          : displayLabel;
+
+        return {
+          email: profileEmail,
+          normalizedEmail,
+          rawEmail: trimmed,
+          label,
+          isCurrent,
+        };
+      })
+      .filter(Boolean);
+  }, [activeMembers, userDirectory, normalizedCurrentUserEmail]);
 
   return (
     <div className="app-wrapper">
@@ -1077,30 +1210,24 @@ export default function App() {
           <div className="app-members-panel">
             <div className="app-members-header">
               <span className="app-members-title">Участники</span>
-              <span className="app-members-count">{activeMembers.length}</span>
+              <span className="app-members-count">{memberEntries.length}</span>
             </div>
             <div className="app-members-list">
-              {activeMembers.map((member) => {
-                const normalizedMember = (member ?? "").toString().trim();
-                if (!normalizedMember) return null;
-                const isCurrent =
-                  normalizedMember.toLowerCase() === normalizedCurrentUserEmail;
-                const displayText = isCurrent
-                  ? `Вы • ${normalizedMember}`
-                  : normalizedMember;
+              {memberEntries.map((member) => {
+                const key = `${member.normalizedEmail}-${member.label}`;
                 return (
                   <span
-                    key={normalizedMember}
+                    key={key}
                     className={`app-member-chip${
-                      isCurrent ? " app-member-chip--current" : ""
+                      member.isCurrent ? " app-member-chip--current" : ""
                     }`}
                   >
-                    {displayText}
-                    {!isCurrent && (
+                    {member.label}
+                    {!member.isCurrent && (
                       <button
                         type="button"
                         className="app-member-remove"
-                        onClick={() => handleRemoveMember(normalizedMember)}
+                        onClick={() => handleRemoveMember(member.rawEmail)}
                         title="Удалить участника"
                         disabled={isInvitingMember}
                       >
