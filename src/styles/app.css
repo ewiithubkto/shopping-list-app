@@ -570,7 +570,7 @@
   align-items: center;
 }
 
-.app-members-input {
+.app-members-select {
   flex: 1 1 220px;
   min-width: 0;
   padding: 10px 12px;
@@ -579,9 +579,15 @@
   background: var(--surface);
   font-size: 0.95rem;
   color: var(--text);
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, rgba(111, 91, 255, 0.6) 50%),
+    linear-gradient(135deg, rgba(111, 91, 255, 0.6) 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% + 1px), calc(100% - 12px) calc(50% + 1px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
 }
 
-.app-members-input:focus-visible {
+.app-members-select:focus-visible {
   outline: 2px solid var(--primary-light);
   outline-offset: 2px;
 }
@@ -607,6 +613,11 @@
   margin: 0;
   font-size: 0.85rem;
   color: var(--danger);
+}
+
+.app-members-empty {
+  font-size: 0.9rem;
+  color: var(--muted);
 }
 
 .section-title {

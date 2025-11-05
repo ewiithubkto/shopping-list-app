@@ -547,9 +547,9 @@ export default function App() {
     event.preventDefault();
     if (!activeListId || !activeList) return;
 
-    const trimmed = inviteEmail.trim();
+    const trimmed = (inviteEmail ?? "").toString().trim();
     if (!trimmed) {
-      setInviteError("Введите email участника.");
+      setInviteError("Выберите участника из списка.");
       return;
     }
     if (!isValidEmail(trimmed)) {
@@ -591,7 +591,7 @@ export default function App() {
     }
   }
 
-  async function handleRemoveMember(memberEmail) {
+  async function handleRemoveMember(memberEmail, memberName = "") {
     if (!activeListId || !activeList) return;
 
     const trimmed = (memberEmail ?? "").toString().trim();
@@ -601,6 +601,14 @@ export default function App() {
       normalizedTarget === normalizedCurrentUserEmail ||
       !isValidEmail(trimmed)
     ) {
+      return;
+    }
+
+    const displayName = (memberName ?? "").toString().trim() || trimmed;
+    const shouldRemove =
+      typeof window === "undefined" ||
+      window.confirm(`Удалить участника ${displayName} из списка?`);
+    if (!shouldRemove) {
       return;
     }
 
@@ -1061,11 +1069,23 @@ export default function App() {
   }
 
   const isShoppingTab = activeTab === "shopping";
+  const isAllTab = activeTab === "all";
   const activeMembers = Array.isArray(activeList?.members)
     ? activeList.members
     : [];
-  const trimmedInviteEmail = inviteEmail.trim();
-  const canSubmitInvite = isValidEmail(trimmedInviteEmail);
+  const normalizedMemberSet = useMemo(() => {
+    const set = new Set();
+    activeMembers.forEach((member) => {
+      const normalized = normalizeEmailValue(member);
+      if (normalized) {
+        set.add(normalized);
+      }
+    });
+    if (normalizedCurrentUserEmail) {
+      set.add(normalizedCurrentUserEmail);
+    }
+    return set;
+  }, [activeMembers, normalizedCurrentUserEmail]);
   const memberEntries = useMemo(() => {
     if (!Array.isArray(activeMembers) || activeMembers.length === 0) {
       return [];
@@ -1078,42 +1098,80 @@ export default function App() {
         const normalizedEmail = normalizeEmailValue(trimmed);
         if (!normalizedEmail) return null;
 
+        if (normalizedEmail === normalizedCurrentUserEmail) {
+          return null;
+        }
+
         const profile = userDirectory[normalizedEmail] ?? null;
         const profileName = (profile?.name ?? "").toString().trim();
         const profileEmail = (profile?.email ?? trimmed).toString().trim();
         const hasName = Boolean(profileName);
-        const isCurrent =
-          normalizedEmail === normalizedCurrentUserEmail;
 
-        const displayLabel = hasName
+        const displayName = hasName ? profileName : profileEmail;
+        const label = hasName
           ? profileName
           : `${profileEmail} (ожидает подключения)`;
-
-        const label = isCurrent
-          ? `Вы • ${hasName ? profileName : profileEmail}`
-          : displayLabel;
 
         return {
           email: profileEmail,
           normalizedEmail,
           rawEmail: trimmed,
           label,
-          isCurrent,
+          displayName,
         };
       })
       .filter(Boolean);
   }, [activeMembers, userDirectory, normalizedCurrentUserEmail]);
+  const availableInviteOptions = useMemo(() => {
+    const entries = Object.values(userDirectory ?? {});
+
+    return entries
+      .map((profile) => {
+        if (!profile) return null;
+        const rawEmail = (profile.email ?? "").toString().trim();
+        if (!isValidEmail(rawEmail)) return null;
+        const normalizedEmail = normalizeEmailValue(rawEmail);
+        if (!normalizedEmail || normalizedEmail === normalizedCurrentUserEmail) {
+          return null;
+        }
+        if (normalizedMemberSet.has(normalizedEmail)) {
+          return null;
+        }
+
+        const name = (profile.name ?? "").toString().trim();
+        const label = name || `${rawEmail} (ожидает подключения)`;
+
+        return {
+          email: rawEmail,
+          normalizedEmail,
+          label,
+        };
+      })
+      .filter(Boolean)
+      .sort((first, second) =>
+        first.label.localeCompare(second.label, "ru", { sensitivity: "base" })
+      );
+  }, [userDirectory, normalizedCurrentUserEmail, normalizedMemberSet]);
+  const totalMembersCount = normalizedMemberSet.size;
+  useEffect(() => {
+    if (!inviteEmail) return;
+    const normalized = normalizeEmailValue(inviteEmail);
+    const stillAvailable = availableInviteOptions.some(
+      (option) => option.normalizedEmail === normalized
+    );
+
+    if (!stillAvailable) {
+      setInviteEmail("");
+    }
+  }, [availableInviteOptions, inviteEmail]);
+  const canSubmitInvite =
+    Boolean(inviteEmail) &&
+    isValidEmail(inviteEmail) &&
+    !normalizedMemberSet.has(normalizeEmailValue(inviteEmail));
 
   return (
     <div className="app-wrapper">
       <div className="app-title-card">
-        <div className="app-user-bar">
-          <div className="app-user-meta">
-            <span className="app-user-label">Текущий пользователь</span>
-            <span className="app-user-name">{currentUser.name}</span>
-          </div>
-          <span className="app-user-email">{currentUser.email}</span>
-        </div>
         <div className={`app-title-header${isShoppingTab ? "" : " is-catalog"}`}>
           {isShoppingTab && isRenamingList && activeList ? (
             <form
@@ -1206,45 +1264,44 @@ export default function App() {
             </div>
           )}
         </div>
-        {activeList && (
+        {activeList && isAllTab && (
           <div className="app-members-panel">
             <div className="app-members-header">
               <span className="app-members-title">Участники</span>
-              <span className="app-members-count">{memberEntries.length}</span>
+              <span className="app-members-count">{totalMembersCount}</span>
             </div>
             <div className="app-members-list">
               {memberEntries.map((member) => {
-                const key = `${member.normalizedEmail}-${member.label}`;
                 return (
                   <span
-                    key={key}
-                    className={`app-member-chip${
-                      member.isCurrent ? " app-member-chip--current" : ""
-                    }`}
+                    key={member.normalizedEmail}
+                    className="app-member-chip"
                   >
                     {member.label}
-                    {!member.isCurrent && (
-                      <button
-                        type="button"
-                        className="app-member-remove"
-                        onClick={() => handleRemoveMember(member.rawEmail)}
-                        title="Удалить участника"
-                        disabled={isInvitingMember}
-                      >
-                        ❌
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="app-member-remove"
+                      onClick={() =>
+                        handleRemoveMember(member.rawEmail, member.displayName)
+                      }
+                      title="Удалить участника"
+                      disabled={isInvitingMember}
+                    >
+                      ❌
+                    </button>
                   </span>
                 );
               })}
+              {memberEntries.length === 0 && (
+                <span className="app-members-empty">Участников пока нет</span>
+              )}
             </div>
             <form
               className="app-members-form"
               onSubmit={handleInviteSubmit}
             >
-              <input
-                type="email"
-                className="app-members-input"
+              <select
+                className="app-members-select"
                 value={inviteEmail}
                 onChange={(event) => {
                   setInviteEmail(event.target.value);
@@ -1252,10 +1309,20 @@ export default function App() {
                     setInviteError("");
                   }
                 }}
-                placeholder="Email участника"
-                aria-label="Email участника"
-                disabled={isInvitingMember}
-              />
+                aria-label="Выбрать участника"
+                disabled={isInvitingMember || availableInviteOptions.length === 0}
+              >
+                <option value="">
+                  {availableInviteOptions.length === 0
+                    ? "Нет доступных участников"
+                    : "Выбрать участника"}
+                </option>
+                {availableInviteOptions.map((option) => (
+                  <option key={option.normalizedEmail} value={option.email}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <button
                 type="submit"
                 className="app-members-submit"
