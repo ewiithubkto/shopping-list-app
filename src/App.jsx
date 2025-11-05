@@ -2,11 +2,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { onValue, push, ref, remove, set } from "firebase/database";
 import Form from "./components/Form";
 import List from "./components/List";
+import MembersPanel from "./components/MembersPanel";
+import ConfirmModal from "./components/ConfirmModal";
 import UserSetup from "./components/UserSetup";
+import { ToastProvider, useToast } from "./components/ToastProvider";
 import baseCatalog from "./data/products.json";
 import { rtdb } from "./firebase";
+import { useMembersData } from "./hooks/useMembersData";
 import { normalizeName } from "./utils/items";
 import { isValidEmail } from "./utils/validation";
+import {
+  decodeEmailKey,
+  encodeEmailKey,
+  normalizeEmailValue,
+} from "./utils/email";
 import "./styles/app.css";
 
 const DEFAULT_CATEGORY = "Другое";
@@ -15,18 +24,6 @@ const LISTS_PATH = "lists";
 const USERS_PATH = "users";
 const EMPTY_ITEMS = Object.freeze([]);
 const USER_STORAGE_KEY = "shoppingListApp.currentUser";
-
-function normalizeEmailValue(value) {
-  return (value ?? "").toString().trim().toLowerCase();
-}
-
-function encodeEmailKey(value) {
-  return normalizeEmailValue(value).replace(/\./g, ",");
-}
-
-function decodeEmailKey(key) {
-  return (key ?? "").toString().trim().replace(/,/g, ".");
-}
 
 function normalizeUser(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -187,7 +184,8 @@ function areItemsEqual(first, second) {
   return JSON.stringify(first) === JSON.stringify(second);
 }
 
-export default function App() {
+function AppContent() {
+  const { showToast } = useToast();
   const [currentUser, setCurrentUser] = useState(() => loadStoredUser());
   const [itemsState, setItemsState] = useState({ listId: null, data: [] });
   const [catalog, setCatalog] = useState([]);
@@ -201,15 +199,15 @@ export default function App() {
   const [isRenamingList, setIsRenamingList] = useState(false);
   const [renameListValue, setRenameListValue] = useState("");
   const [isRenamingSubmitting, setIsRenamingSubmitting] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteError, setInviteError] = useState("");
   const [isInvitingMember, setIsInvitingMember] = useState(false);
   const [userDirectory, setUserDirectory] = useState({});
-  const [isMembersExpanded, setIsMembersExpanded] = useState(false);
   const [pendingMemberRemoval, setPendingMemberRemoval] = useState(null);
 
   const activeList =
     lists.find((list) => list.id === activeListId) ?? null;
+  const activeMembers = Array.isArray(activeList?.members)
+    ? activeList.members
+    : EMPTY_ITEMS;
   const items = useMemo(() => {
     if (itemsState.listId !== activeListId) {
       return EMPTY_ITEMS;
@@ -228,6 +226,17 @@ export default function App() {
     const email = (currentUser?.email ?? "").toString().trim();
     return email.toLowerCase();
   }, [currentUser]);
+
+  const {
+    memberEntries,
+    availableInviteOptions,
+    totalMembersCount,
+    normalizedMemberSet,
+  } = useMembersData({
+    members: activeMembers,
+    currentUserEmail: currentUser?.email ?? "",
+    userDirectory,
+  });
 
   useEffect(() => {
     persistUser(currentUser);
@@ -316,10 +325,7 @@ export default function App() {
   }, [activeListId, activeList]);
 
   useEffect(() => {
-    setInviteEmail("");
-    setInviteError("");
     setIsInvitingMember(false);
-    setIsMembersExpanded(false);
     setPendingMemberRemoval(null);
   }, [activeListId]);
 
@@ -472,12 +478,20 @@ export default function App() {
       setIsCreatingList(false);
       setNewListName("");
       setNewListMembers("");
+      showToast({
+        type: "success",
+        message: `Список "${trimmedName}" создан.`,
+      });
     } catch (error) {
       console.error("Failed to create list", error);
-  } finally {
-    setIsSubmittingList(false);
+      showToast({
+        type: "error",
+        message: "Не удалось создать список. Попробуйте ещё раз.",
+      });
+    } finally {
+      setIsSubmittingList(false);
+    }
   }
-}
 
   async function handleRenameListSubmit(event) {
     event.preventDefault();
@@ -504,8 +518,16 @@ export default function App() {
         )
       );
       setIsRenamingList(false);
+      showToast({
+        type: "success",
+        message: "Название списка обновлено.",
+      });
     } catch (error) {
       console.error("Failed to rename list", error);
+      showToast({
+        type: "error",
+        message: "Не удалось переименовать список.",
+      });
     } finally {
       setIsRenamingSubmitting(false);
     }
@@ -520,6 +542,7 @@ export default function App() {
 
   async function handleDeleteList() {
     if (!activeListId) return;
+    const listName = activeList?.name ?? "Список";
     const confirmDelete =
       typeof window === "undefined" ||
       window.confirm("Удалить текущий список?");
@@ -528,8 +551,16 @@ export default function App() {
 
     try {
       await remove(ref(rtdb, `${LISTS_PATH}/${activeListId}`));
+      showToast({
+        type: "success",
+        message: `Список "${listName}" удалён.`,
+      });
     } catch (error) {
       console.error("Failed to delete list", error);
+      showToast({
+        type: "error",
+        message: "Не удалось удалить список. Попробуйте ещё раз.",
+      });
       return;
     }
 
@@ -547,38 +578,31 @@ export default function App() {
     });
   }
 
-  async function handleInviteSubmit(event) {
-    event.preventDefault();
-    if (!activeListId || !activeList) return;
+  async function handleInviteMember(email) {
+    if (!activeListId || !activeList) {
+      throw new Error("Сначала выберите список.");
+    }
 
-    const trimmed = (inviteEmail ?? "").toString().trim();
+    const trimmed = (email ?? "").toString().trim();
     if (!trimmed) {
-      setInviteError("Выберите участника из списка.");
-      return;
+      throw new Error("Выберите участника из списка.");
     }
     if (!isValidEmail(trimmed)) {
-      setInviteError("Проверьте формат email.");
-      return;
+      throw new Error("Проверьте формат email.");
     }
 
     const normalized = normalizeEmailValue(trimmed);
+    if (normalizedMemberSet.has(normalized)) {
+      throw new Error("Этот участник уже в списке.");
+    }
+
     const existingMembers = Array.isArray(activeList.members)
       ? activeList.members
       : [];
-    const alreadyExists = existingMembers.some(
-      (member) => normalizeEmailValue(member) === normalized
-    );
-
-    if (alreadyExists) {
-      setInviteError("Этот участник уже в списке.");
-      return;
-    }
-
     const nextMembers = [...existingMembers, trimmed];
 
     try {
       setIsInvitingMember(true);
-      setInviteError("");
       const membersRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/members`);
       await set(membersRef, nextMembers);
       setLists((prev) =>
@@ -586,10 +610,18 @@ export default function App() {
           list.id === activeListId ? { ...list, members: nextMembers } : list
         )
       );
-      setInviteEmail("");
+      const displayName =
+        (userDirectory[normalized]?.name ?? "").toString().trim() || trimmed;
+      showToast({
+        type: "success",
+        message: `Приглашение отправлено: ${displayName}.`,
+      });
+      return trimmed;
     } catch (error) {
       console.error("Failed to invite member", error);
-      setInviteError("Не удалось пригласить участника. Попробуйте ещё раз.");
+      const message = "Не удалось пригласить участника. Попробуйте ещё раз.";
+      showToast({ type: "error", message });
+      throw new Error(message);
     } finally {
       setIsInvitingMember(false);
     }
@@ -618,7 +650,7 @@ export default function App() {
     });
   }
 
-  async function removeMember(memberEmail) {
+  async function removeMember(memberEmail, memberName = "") {
     if (!activeListId || !activeList) return;
 
     const trimmed = (memberEmail ?? "").toString().trim();
@@ -649,8 +681,17 @@ export default function App() {
           list.id === activeListId ? { ...list, members: nextMembers } : list
         )
       );
+      const display = memberName || trimmed;
+      showToast({
+        type: "success",
+        message: `Участник ${display} удалён.`,
+      });
     } catch (error) {
       console.error("Failed to remove member", error);
+      showToast({
+        type: "error",
+        message: "Не удалось удалить участника. Попробуйте ещё раз.",
+      });
     } finally {
       setIsInvitingMember(false);
     }
@@ -659,7 +700,10 @@ export default function App() {
   async function handleConfirmRemoveMember() {
     if (!pendingMemberRemoval) return;
     try {
-      await removeMember(pendingMemberRemoval.email);
+      await removeMember(
+        pendingMemberRemoval.email,
+        pendingMemberRemoval.displayName
+      );
     } finally {
       setPendingMemberRemoval(null);
     }
@@ -935,7 +979,6 @@ export default function App() {
       setIsRenamingList(false);
     }
     if (activeTab !== "all") {
-      setIsMembersExpanded(false);
       setPendingMemberRemoval(null);
     }
   }, [activeTab]);
@@ -1096,105 +1139,6 @@ export default function App() {
 
   const isShoppingTab = activeTab === "shopping";
   const isAllTab = activeTab === "all";
-  const activeMembers = Array.isArray(activeList?.members)
-    ? activeList.members
-    : EMPTY_ITEMS;
-  const normalizedMemberSet = useMemo(() => {
-    const set = new Set();
-    activeMembers.forEach((member) => {
-      const normalized = normalizeEmailValue(member);
-      if (normalized) {
-        set.add(normalized);
-      }
-    });
-    if (normalizedCurrentUserEmail) {
-      set.add(normalizedCurrentUserEmail);
-    }
-    return set;
-  }, [activeMembers, normalizedCurrentUserEmail]);
-  const memberEntries = useMemo(() => {
-    if (!Array.isArray(activeMembers) || activeMembers.length === 0) {
-      return [];
-    }
-
-    return activeMembers
-      .map((member) => {
-        const trimmed = (member ?? "").toString().trim();
-        if (!trimmed) return null;
-        const normalizedEmail = normalizeEmailValue(trimmed);
-        if (!normalizedEmail) return null;
-
-        if (normalizedEmail === normalizedCurrentUserEmail) {
-          return null;
-        }
-
-        const profile = userDirectory[normalizedEmail] ?? null;
-        const profileName = (profile?.name ?? "").toString().trim();
-        const profileEmail = (profile?.email ?? trimmed).toString().trim();
-        const hasName = Boolean(profileName);
-
-        const displayName = hasName ? profileName : profileEmail;
-        const label = hasName
-          ? profileName
-          : `${profileEmail} (ожидает подключения)`;
-
-        return {
-          email: profileEmail,
-          normalizedEmail,
-          rawEmail: trimmed,
-          label,
-          displayName,
-        };
-      })
-      .filter(Boolean);
-  }, [activeMembers, userDirectory, normalizedCurrentUserEmail]);
-  const availableInviteOptions = useMemo(() => {
-    const entries = Object.values(userDirectory ?? {});
-
-    return entries
-      .map((profile) => {
-        if (!profile) return null;
-        const rawEmail = (profile.email ?? "").toString().trim();
-        if (!isValidEmail(rawEmail)) return null;
-        const normalizedEmail = normalizeEmailValue(rawEmail);
-        if (!normalizedEmail || normalizedEmail === normalizedCurrentUserEmail) {
-          return null;
-        }
-        if (normalizedMemberSet.has(normalizedEmail)) {
-          return null;
-        }
-
-        const name = (profile.name ?? "").toString().trim();
-        const label = name || `${rawEmail} (ожидает подключения)`;
-
-        return {
-          email: rawEmail,
-          normalizedEmail,
-          label,
-        };
-      })
-      .filter(Boolean)
-      .sort((first, second) =>
-        first.label.localeCompare(second.label, "ru", { sensitivity: "base" })
-      );
-  }, [userDirectory, normalizedCurrentUserEmail, normalizedMemberSet]);
-  const totalMembersCount = normalizedMemberSet.size;
-  useEffect(() => {
-    if (!inviteEmail) return;
-    const normalized = normalizeEmailValue(inviteEmail);
-    const stillAvailable = availableInviteOptions.some(
-      (option) => option.normalizedEmail === normalized
-    );
-
-    if (!stillAvailable) {
-      setInviteEmail("");
-    }
-  }, [availableInviteOptions, inviteEmail]);
-  const canSubmitInvite =
-    Boolean(inviteEmail) &&
-    isValidEmail(inviteEmail) &&
-    !normalizedMemberSet.has(normalizeEmailValue(inviteEmail));
-
   if (!currentUser) {
     return (
       <div className="app-wrapper">
@@ -1298,103 +1242,16 @@ export default function App() {
             </div>
           )}
         </div>
-        {activeList && isAllTab && (
-          <div className="app-members-panel">
-            <button
-              type="button"
-              className={`app-members-toggle${
-                isMembersExpanded ? " is-open" : ""
-              }`}
-              onClick={() => setIsMembersExpanded((prev) => !prev)}
-              aria-expanded={isMembersExpanded}
-            >
-              <span className="app-members-title">Участники</span>
-              <span className="app-members-count">{totalMembersCount}</span>
-              <span className="app-members-icon" aria-hidden="true">
-                ⌄
-              </span>
-            </button>
-            <div
-              className={`app-members-content${
-                isMembersExpanded ? " is-open" : ""
-              }`}
-            >
-              <div className="app-members-list">
-                {memberEntries.map((member) => {
-                  return (
-                    <span
-                      key={member.normalizedEmail}
-                      className="app-member-chip"
-                    >
-                      {member.label}
-                      <button
-                        type="button"
-                        className="app-member-remove"
-                        onClick={() =>
-                          requestMemberRemoval(
-                            member.rawEmail,
-                            member.displayName
-                          )
-                        }
-                        title="Удалить участника"
-                        disabled={isInvitingMember}
-                      >
-                        ❌
-                      </button>
-                    </span>
-                  );
-                })}
-                {memberEntries.length === 0 && (
-                  <span className="app-members-empty">
-                    Участников пока нет
-                  </span>
-                )}
-              </div>
-              <form
-                className="app-members-form"
-                onSubmit={handleInviteSubmit}
-              >
-                <select
-                  className="app-members-select"
-                  value={inviteEmail}
-                  onChange={(event) => {
-                    setInviteEmail(event.target.value);
-                    if (inviteError) {
-                      setInviteError("");
-                    }
-                  }}
-                  aria-label="Выбрать участника"
-                  disabled={
-                    isInvitingMember || availableInviteOptions.length === 0
-                  }
-                >
-                  <option value="">
-                    {availableInviteOptions.length === 0
-                      ? "Нет доступных участников"
-                      : "Выбрать участника"}
-                  </option>
-                  {availableInviteOptions.map((option) => (
-                    <option key={option.normalizedEmail} value={option.email}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  className="app-members-submit"
-                  disabled={!canSubmitInvite || isInvitingMember}
-                >
-                  Пригласить
-                </button>
-              </form>
-              {inviteError && (
-                <p className="app-members-error" role="alert">
-                  {inviteError}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+        <MembersPanel
+          visible={Boolean(activeList && isAllTab)}
+          memberEntries={memberEntries}
+          totalMembersCount={totalMembersCount}
+          availableInviteOptions={availableInviteOptions}
+          onInvite={handleInviteMember}
+          isInviting={isInvitingMember}
+          onRequestRemove={requestMemberRemoval}
+          activeListId={activeListId}
+        />
         {!isShoppingTab && (
           <div className="app-list-controls">
             <button
@@ -1471,33 +1328,27 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
-      {pendingMemberRemoval && (
-        <div className="modal-overlay" role="dialog" aria-modal="true">
-          <div className="modal-card">
-            <p className="modal-text">
-              Удалить участника {pendingMemberRemoval.displayName} из списка?
-            </p>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="modal-button modal-button--secondary"
-                onClick={handleCancelRemoveMember}
-                disabled={isInvitingMember}
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                className="modal-button modal-button--primary"
-                onClick={handleConfirmRemoveMember}
-                disabled={isInvitingMember}
-              >
-                Удалить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        open={Boolean(pendingMemberRemoval)}
+        message={
+          pendingMemberRemoval
+            ? `Удалить участника ${pendingMemberRemoval.displayName} из списка?`
+            : ""
+        }
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        onConfirm={handleConfirmRemoveMember}
+        onCancel={handleCancelRemoveMember}
+        confirmDisabled={isInvitingMember}
+      />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }
