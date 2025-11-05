@@ -541,6 +541,46 @@ export default function App() {
     }
   }
 
+  async function handleRemoveMember(memberEmail) {
+    if (!activeListId || !activeList) return;
+
+    const trimmed = (memberEmail ?? "").toString().trim();
+    if (!trimmed) return;
+    if (
+      trimmed.toLowerCase() === normalizedCurrentUserEmail ||
+      !isValidEmail(trimmed)
+    ) {
+      return;
+    }
+
+    const existingMembers = Array.isArray(activeList.members)
+      ? activeList.members
+      : [];
+    const nextMembers = existingMembers.filter(
+      (member) =>
+        (member ?? "").toString().trim().toLowerCase() !== trimmed.toLowerCase()
+    );
+
+    if (nextMembers.length === existingMembers.length) {
+      return;
+    }
+
+    try {
+      setIsInvitingMember(true);
+      const membersRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/members`);
+      await set(membersRef, nextMembers);
+      setLists((prev) =>
+        prev.map((list) =>
+          list.id === activeListId ? { ...list, members: nextMembers } : list
+        )
+      );
+    } catch (error) {
+      console.error("Failed to remove member", error);
+    } finally {
+      setIsInvitingMember(false);
+    }
+  }
+
   function addItem(name, category = DEFAULT_CATEGORY) {
     if (!activeListId) return;
     const trimmed = name.trim();
@@ -1056,6 +1096,17 @@ export default function App() {
                     }`}
                   >
                     {displayText}
+                    {!isCurrent && (
+                      <button
+                        type="button"
+                        className="app-member-remove"
+                        onClick={() => handleRemoveMember(normalizedMember)}
+                        title="Удалить участника"
+                        disabled={isInvitingMember}
+                      >
+                        ❌
+                      </button>
+                    )}
                   </span>
                 );
               })}
