@@ -19,6 +19,7 @@ import {
 import "./styles/app.css";
 
 const DEFAULT_CATEGORY = "Другое";
+const FAMILY_LIST_NAME = "Семейный список";
 const CATALOG_PATH = "shopping/catalog";
 const LISTS_PATH = "lists";
 const USERS_PATH = "users";
@@ -98,6 +99,51 @@ function normalizeCatalogItem(item) {
     name,
     category,
   };
+}
+
+function isFamilyListName(name) {
+  return normalizeName(name ?? "") === normalizeName(FAMILY_LIST_NAME);
+}
+
+function getListItemsCount(entry) {
+  if (!entry || !entry.items) return 0;
+  if (Array.isArray(entry.items)) {
+    return entry.items.length;
+  }
+  if (typeof entry.items === "object") {
+    return Object.keys(entry.items).length;
+  }
+  return 0;
+}
+
+function shouldPreferFamilyEntry(existingEntry, candidateEntry, activeListId) {
+  if (!candidateEntry) return false;
+  if (!existingEntry) return true;
+
+  if (candidateEntry.id === activeListId && existingEntry.id !== activeListId) {
+    return true;
+  }
+  if (existingEntry.id === activeListId && candidateEntry.id !== activeListId) {
+    return false;
+  }
+
+  const candidateItems = getListItemsCount(candidateEntry);
+  const existingItems = getListItemsCount(existingEntry);
+  if (candidateItems !== existingItems) {
+    return candidateItems > existingItems;
+  }
+
+  const candidateMembers = Array.isArray(candidateEntry.members)
+    ? candidateEntry.members.length
+    : 0;
+  const existingMembers = Array.isArray(existingEntry.members)
+    ? existingEntry.members.length
+    : 0;
+  if (candidateMembers !== existingMembers) {
+    return candidateMembers > existingMembers;
+  }
+
+  return false;
 }
 
 function normalizeListEntry(id, value, currentUser) {
@@ -205,6 +251,7 @@ function AppContent() {
 
   const activeList =
     lists.find((list) => list.id === activeListId) ?? null;
+  const isFamilyList = isFamilyListName(activeList?.name);
   const activeMembers = Array.isArray(activeList?.members)
     ? activeList.members
     : EMPTY_ITEMS;
@@ -221,11 +268,42 @@ function AppContent() {
   const hasSeededCatalogRef = useRef(false);
   const hasSeededDefaultListRef = useRef(false);
   const currentItemsListIdRef = useRef(null);
+  const activeListIdRef = useRef(null);
   const lastSyncedUserProfileRef = useRef({ email: null, name: null });
   const normalizedCurrentUserEmail = useMemo(() => {
     const email = (currentUser?.email ?? "").toString().trim();
     return email.toLowerCase();
   }, [currentUser]);
+
+  const allKnownUserEmails = useMemo(() => {
+    const entries = Object.values(userDirectory ?? {});
+    const normalizedSet = new Set();
+    const resolved = [];
+
+    entries.forEach((profile) => {
+      if (!profile) return;
+      const rawEmail = (profile.email ?? "").toString().trim();
+      if (!isValidEmail(rawEmail)) return;
+      const normalized = normalizeEmailValue(rawEmail);
+      if (!normalized || normalizedSet.has(normalized)) return;
+      normalizedSet.add(normalized);
+      resolved.push(rawEmail);
+    });
+
+    const currentEmail = (currentUser?.email ?? "").toString().trim();
+    if (isValidEmail(currentEmail)) {
+      const normalized = normalizeEmailValue(currentEmail);
+      if (normalized && !normalizedSet.has(normalized)) {
+        normalizedSet.add(normalized);
+        resolved.push(currentEmail);
+      }
+    }
+
+    return resolved;
+  }, [userDirectory, currentUser]);
+
+  const membersForDisplay = isFamilyList ? allKnownUserEmails : activeMembers;
+  const currentUserName = (currentUser?.name ?? "").toString().trim();
 
   const {
     memberEntries,
@@ -233,14 +311,33 @@ function AppContent() {
     totalMembersCount,
     normalizedMemberSet,
   } = useMembersData({
-    members: activeMembers,
+    members: membersForDisplay,
     currentUserEmail: currentUser?.email ?? "",
     userDirectory,
   });
 
+  const totalKnownUsersCount = useMemo(() => {
+    const directoryKeys = Object.keys(userDirectory ?? {});
+    if (!normalizedCurrentUserEmail) {
+      return directoryKeys.length;
+    }
+
+    return directoryKeys.includes(normalizedCurrentUserEmail)
+      ? directoryKeys.length
+      : directoryKeys.length + 1;
+  }, [userDirectory, normalizedCurrentUserEmail]);
+
+  const displayedMembersCount = isFamilyList
+    ? totalKnownUsersCount
+    : totalMembersCount;
+
   useEffect(() => {
     persistUser(currentUser);
   }, [currentUser]);
+
+  useEffect(() => {
+    activeListIdRef.current = activeListId;
+  }, [activeListId]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -852,6 +949,7 @@ function AppContent() {
       const normalizedRawMembers = trimmedRawMembers
         .map((member) => normalizeEmailValue(member))
         .filter(Boolean);
+      const isFamilyList = isFamilyListName(value.name);
 
       const hasCurrentInRaw =
         normalizedCurrentUserEmail &&
@@ -859,7 +957,7 @@ function AppContent() {
           (member) => member === normalizedCurrentUserEmail
         );
 
-      if (!hasCurrentInRaw) {
+      if (!isFamilyList && !hasCurrentInRaw) {
         return null;
       }
 
@@ -897,9 +995,29 @@ function AppContent() {
 
       const uniqueById = [];
       const seenIds = new Set();
+      let familyListIndex = null;
+
+      const preferredActiveListId = activeListIdRef.current;
 
       resolved.forEach((entry) => {
         if (!entry) return;
+
+        if (isFamilyListName(entry.name)) {
+          if (familyListIndex === null) {
+            uniqueById.push(entry);
+            familyListIndex = uniqueById.length - 1;
+          } else if (
+            shouldPreferFamilyEntry(
+              uniqueById[familyListIndex],
+              entry,
+              preferredActiveListId
+            )
+          ) {
+            uniqueById[familyListIndex] = entry;
+          }
+          return;
+        }
+
         const key =
           entry.id ??
           normalizeName(entry.name) ??
@@ -912,8 +1030,8 @@ function AppContent() {
       setLists(uniqueById);
 
       if (!hasSeededDefaultListRef.current) {
-        const alreadyHasDefault = resolved.some(
-          (entry) => normalizeName(entry.name) === normalizeName("Семейный список")
+        const alreadyHasDefault = resolved.some((entry) =>
+          isFamilyListName(entry.name)
         );
 
         if (alreadyHasDefault) {
@@ -923,7 +1041,7 @@ function AppContent() {
         hasSeededDefaultListRef.current = true;
 
         const payload = {
-          name: "Семейный список",
+          name: FAMILY_LIST_NAME,
           members: [(currentUser.email ?? "").toString().trim()],
           items: {},
         };
@@ -1150,6 +1268,9 @@ function AppContent() {
   return (
     <div className="app-wrapper">
       <div className="app-title-card">
+        {currentUserName && (
+          <div className="app-current-user-pill">{currentUserName}</div>
+        )}
         <div className={`app-title-header${isShoppingTab ? "" : " is-catalog"}`}>
           {isShoppingTab && isRenamingList && activeList ? (
             <form
@@ -1245,12 +1366,14 @@ function AppContent() {
         <MembersPanel
           visible={Boolean(activeList && isAllTab)}
           memberEntries={memberEntries}
-          totalMembersCount={totalMembersCount}
+          totalMembersCount={displayedMembersCount}
           availableInviteOptions={availableInviteOptions}
           onInvite={handleInviteMember}
           isInviting={isInvitingMember}
           onRequestRemove={requestMemberRemoval}
           activeListId={activeListId}
+          allowMemberRemoval={!isFamilyList}
+          allowInvites={!isFamilyList}
         />
         {!isShoppingTab && (
           <div className="app-list-controls">

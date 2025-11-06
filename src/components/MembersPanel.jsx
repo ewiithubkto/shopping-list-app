@@ -10,6 +10,8 @@ export default function MembersPanel({
   isInviting,
   onRequestRemove,
   activeListId,
+  allowMemberRemoval = true,
+  allowInvites = true,
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState("");
@@ -71,55 +73,62 @@ export default function MembersPanel({
           {memberEntries.map((member) => (
             <span key={member.normalizedEmail} className="app-member-chip">
               {member.label}
-              <button
-                type="button"
-                className="app-member-remove"
-                onClick={() => onRequestRemove(member.rawEmail, member.displayName)}
-                title="Удалить участника"
-                disabled={isInviting}
-              >
-                ❌
-              </button>
+              {allowMemberRemoval && (
+                <button
+                  type="button"
+                  className="app-member-remove"
+                  onClick={() => onRequestRemove(member.rawEmail, member.displayName)}
+                  title="Удалить участника"
+                  disabled={isInviting}
+                  aria-label={`Удалить ${member.displayName}`}
+                >
+                  ✕
+                </button>
+              )}
             </span>
           ))}
           {memberEntries.length === 0 && (
             <span className="app-members-empty">Участников пока нет</span>
           )}
         </div>
-        <form className="app-members-form" onSubmit={handleSubmit}>
-          <select
-            className="app-members-select"
-            value={selectedEmail}
-            onChange={(event) => {
-              setSelectedEmail(event.target.value);
-              setLocalError("");
-            }}
-            aria-label="Выбрать участника"
-            disabled={isInviting || availableInviteOptions.length === 0}
-          >
-            <option value="">
-              {availableInviteOptions.length === 0
-                ? "Нет доступных участников"
-                : "Выбрать участника"}
-            </option>
-            {availableInviteOptions.map((option) => (
-              <option key={option.normalizedEmail} value={option.email}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="app-members-submit"
-            disabled={isInviting || !selectedEmail}
-          >
-            Пригласить
-          </button>
-        </form>
-        {localError && (
-          <p className="app-members-error" role="alert">
-            {localError}
-          </p>
+        {allowInvites && (
+          <>
+            <form className="app-members-form" onSubmit={handleSubmit}>
+              <select
+                className="app-members-select"
+                value={selectedEmail}
+                onChange={(event) => {
+                  setSelectedEmail(event.target.value);
+                  setLocalError("");
+                }}
+                aria-label="Выбрать участника"
+                disabled={isInviting || availableInviteOptions.length === 0}
+              >
+                <option value="">
+                  {availableInviteOptions.length === 0
+                    ? "Нет доступных участников"
+                    : "Выбрать участника"}
+                </option>
+                {availableInviteOptions.map((option) => (
+                  <option key={option.normalizedEmail} value={option.email}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                className="app-members-submit"
+                disabled={isInviting || !selectedEmail}
+              >
+                Пригласить
+              </button>
+            </form>
+            {localError && (
+              <p className="app-members-error" role="alert">
+                {localError}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
