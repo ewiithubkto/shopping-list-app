@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { onValue, push, ref, remove, set } from "firebase/database";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
 import Form from "./components/Form";
 import List from "./components/List";
 import MembersPanel from "./components/MembersPanel";
@@ -7,7 +15,7 @@ import ConfirmModal from "./components/ConfirmModal";
 import UserSetup from "./components/UserSetup";
 import { ToastProvider, useToast } from "./components/ToastProvider";
 import baseCatalog from "./data/products.json";
-import { rtdb } from "./firebase";
+import { db } from "./firebase";
 import { useMembersData } from "./hooks/useMembersData";
 import { normalizeName } from "./utils/items";
 import { isValidEmail } from "./utils/validation";
@@ -20,7 +28,8 @@ import "./styles/app.css";
 
 const DEFAULT_CATEGORY = "Другое";
 const FAMILY_LIST_NAME = "Семейный список";
-const CATALOG_PATH = "shopping/catalog";
+const CATALOG_COLLECTION = "shopping";
+const CATALOG_DOCUMENT = "catalog";
 const LISTS_PATH = "lists";
 const USERS_PATH = "users";
 const EMPTY_ITEMS = Object.freeze([]);
@@ -361,12 +370,16 @@ function AppContent() {
       name: trimmedName,
     };
 
-    const userRef = ref(rtdb, `${USERS_PATH}/${encodeEmailKey(trimmedEmail)}`);
-    set(userRef, {
-      email: trimmedEmail,
-      name: trimmedName,
-      updatedAt: Date.now(),
-    }).catch((error) => {
+    const userRef = doc(db, USERS_PATH, encodeEmailKey(trimmedEmail));
+    setDoc(
+      userRef,
+      {
+        email: trimmedEmail,
+        name: trimmedName,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    ).catch((error) => {
       console.error("Failed to sync user profile", error);
     });
   }, [currentUser]);
@@ -550,10 +563,9 @@ function AppContent() {
 
     try {
       setIsSubmittingList(true);
-      const listsRef = ref(rtdb, LISTS_PATH);
-      const newListRef = push(listsRef);
-      await set(newListRef, payload);
-      const newId = newListRef.key;
+      const listsRef = collection(db, LISTS_PATH);
+      const newListRef = await addDoc(listsRef, payload);
+      const newId = newListRef.id;
 
       const normalized = normalizeListEntry(newId, payload, currentUser);
       if (normalized) {
@@ -607,8 +619,8 @@ function AppContent() {
 
     try {
       setIsRenamingSubmitting(true);
-      const nameRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/name`);
-      await set(nameRef, trimmed);
+      const listRef = doc(db, LISTS_PATH, activeListId);
+      await updateDoc(listRef, { name: trimmed });
       setLists((prev) =>
         prev.map((list) =>
           list.id === activeListId ? { ...list, name: trimmed } : list
@@ -647,7 +659,7 @@ function AppContent() {
     if (!confirmDelete) return;
 
     try {
-      await remove(ref(rtdb, `${LISTS_PATH}/${activeListId}`));
+      await deleteDoc(doc(db, LISTS_PATH, activeListId));
       showToast({
         type: "success",
         message: `Список "${listName}" удалён.`,
@@ -700,8 +712,8 @@ function AppContent() {
 
     try {
       setIsInvitingMember(true);
-      const membersRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/members`);
-      await set(membersRef, nextMembers);
+      const listRef = doc(db, LISTS_PATH, activeListId);
+      await updateDoc(listRef, { members: nextMembers });
       setLists((prev) =>
         prev.map((list) =>
           list.id === activeListId ? { ...list, members: nextMembers } : list
@@ -771,8 +783,8 @@ function AppContent() {
 
     try {
       setIsInvitingMember(true);
-      const membersRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/members`);
-      await set(membersRef, nextMembers);
+      const listRef = doc(db, LISTS_PATH, activeListId);
+      await updateDoc(listRef, { members: nextMembers });
       setLists((prev) =>
         prev.map((list) =>
           list.id === activeListId ? { ...list, members: nextMembers } : list
@@ -937,9 +949,11 @@ function AppContent() {
       return undefined;
     }
 
-    const listsRef = ref(rtdb, LISTS_PATH);
+    const listsRef = collection(db, LISTS_PATH);
 
-    const processEntry = (key, value) => {
+    const processEntry = (listDoc) => {
+      if (!listDoc.exists()) return null;
+      const value = listDoc.data();
       if (!value) return null;
 
       const rawMembers = Array.isArray(value.members) ? value.members : [];
@@ -961,7 +975,11 @@ function AppContent() {
         return null;
       }
 
-      const normalized = normalizeListEntry(key, value, currentUser);
+      const normalized = normalizeListEntry(
+        listDoc.id,
+        value,
+        currentUser
+      );
       if (!normalized) return null;
 
       const shouldUpdateMembers =
@@ -972,26 +990,20 @@ function AppContent() {
         );
 
       if (shouldUpdateMembers) {
-        const membersRef = ref(rtdb, `${LISTS_PATH}/${key}/members`);
-        set(membersRef, normalized.members);
+        updateDoc(listDoc.ref, { members: normalized.members }).catch(
+          (error) => {
+            console.error("Failed to update members", error);
+          }
+        );
       }
 
       return normalized;
     };
 
-    const unsubscribe = onValue(listsRef, (snapshot) => {
-      const raw = snapshot.val();
-      let resolved = [];
-
-      if (Array.isArray(raw)) {
-        resolved = raw
-          .map((entry, index) => processEntry(index, entry))
-          .filter(Boolean);
-      } else if (raw && typeof raw === "object") {
-        resolved = Object.entries(raw)
-          .map(([key, value]) => processEntry(key, value))
-          .filter(Boolean);
-      }
+    const unsubscribe = onSnapshot(listsRef, (snapshot) => {
+      const resolved = snapshot.docs
+        .map((listDoc) => processEntry(listDoc))
+        .filter(Boolean);
 
       const uniqueById = [];
       const seenIds = new Set();
@@ -1046,10 +1058,9 @@ function AppContent() {
           items: {},
         };
 
-        const defaultListRef = push(listsRef);
-        set(defaultListRef, payload)
-          .then(() => {
-            const newId = defaultListRef.key;
+        addDoc(listsRef, payload)
+          .then((newDoc) => {
+            const newId = newDoc.id;
             if (newId) {
               const normalized = normalizeListEntry(newId, payload, currentUser);
               if (normalized) {
@@ -1102,27 +1113,34 @@ function AppContent() {
   }, [activeTab]);
 
   useEffect(() => {
-    const catalogRef = ref(rtdb, CATALOG_PATH);
+    const catalogDocRef = doc(db, CATALOG_COLLECTION, CATALOG_DOCUMENT);
 
-    const unsubscribe = onValue(catalogRef, (snapshot) => {
-      const raw = snapshot.val();
+    const unsubscribe = onSnapshot(catalogDocRef, (snapshot) => {
+      const rawData = snapshot.data();
 
-      if (raw === null) {
+      if (!snapshot.exists()) {
         if (hasSeededCatalogRef.current) return;
 
         hasSeededCatalogRef.current = true;
         lastCatalogSyncedRef.current = INITIAL_CATALOG;
         isCatalogSyncedRef.current = true;
         setCatalog(INITIAL_CATALOG);
-        set(catalogRef, INITIAL_CATALOG);
+        setDoc(catalogDocRef, { entries: INITIAL_CATALOG }).catch((error) => {
+          console.error("Failed to seed catalog", error);
+        });
         return;
       }
 
+      const rawEntries =
+        rawData && typeof rawData === "object"
+          ? rawData.entries ?? rawData
+          : null;
+
       let resolved = [];
-      if (Array.isArray(raw)) {
-        resolved = dedupeCatalog(raw);
-      } else if (raw && typeof raw === "object") {
-        resolved = dedupeCatalog(Object.values(raw));
+      if (Array.isArray(rawEntries)) {
+        resolved = dedupeCatalog(rawEntries);
+      } else if (rawEntries && typeof rawEntries === "object") {
+        resolved = dedupeCatalog(Object.values(rawEntries));
       }
 
       if (resolved.length === 0 && !hasSeededCatalogRef.current) {
@@ -1130,11 +1148,14 @@ function AppContent() {
         lastCatalogSyncedRef.current = INITIAL_CATALOG;
         isCatalogSyncedRef.current = true;
         setCatalog(INITIAL_CATALOG);
-        set(catalogRef, INITIAL_CATALOG);
+        setDoc(catalogDocRef, { entries: INITIAL_CATALOG }).catch((error) => {
+          console.error("Failed to seed empty catalog", error);
+        });
         return;
       }
 
-      hasSeededCatalogRef.current = hasSeededCatalogRef.current || resolved.length > 0;
+      hasSeededCatalogRef.current =
+        hasSeededCatalogRef.current || resolved.length > 0;
       lastCatalogSyncedRef.current = resolved;
       isCatalogSyncedRef.current = true;
       setCatalog(resolved);
@@ -1150,9 +1171,11 @@ function AppContent() {
     if (!isCatalogSyncedRef.current) return;
     if (areItemsEqual(lastCatalogSyncedRef.current, catalog)) return;
 
-    const catalogRef = ref(rtdb, CATALOG_PATH);
+    const catalogDocRef = doc(db, CATALOG_COLLECTION, CATALOG_DOCUMENT);
     lastCatalogSyncedRef.current = catalog;
-    set(catalogRef, catalog);
+    setDoc(catalogDocRef, { entries: catalog }).catch((error) => {
+      console.error("Failed to sync catalog", error);
+    });
   }, [catalog]);
 
   useEffect(() => {
@@ -1173,10 +1196,11 @@ function AppContent() {
     }
 
     currentItemsListIdRef.current = listId;
-    const itemsRef = ref(rtdb, `${LISTS_PATH}/${listId}/items`);
+    const listDocRef = doc(db, LISTS_PATH, listId);
 
-    const unsubscribe = onValue(itemsRef, (snapshot) => {
-      const raw = snapshot.val();
+    const unsubscribe = onSnapshot(listDocRef, (snapshot) => {
+      const data = snapshot.data();
+      const raw = data?.items ?? null;
       let resolved = [];
 
       if (Array.isArray(raw)) {
@@ -1187,8 +1211,10 @@ function AppContent() {
           .filter(Boolean);
       }
 
-      if (raw === null) {
-        set(itemsRef, {});
+      if ((raw === null || raw === undefined) && snapshot.exists()) {
+        setDoc(listDocRef, { items: {} }, { merge: true }).catch((error) => {
+          console.error("Failed to initialize items store", error);
+        });
       }
 
       lastSyncedRef.current = resolved;
@@ -1211,41 +1237,39 @@ function AppContent() {
     if (!isSyncedRef.current) return;
     if (areItemsEqual(lastSyncedRef.current, items)) return;
 
-    const itemsRef = ref(rtdb, `${LISTS_PATH}/${activeListId}/items`);
+    const listDocRef = doc(db, LISTS_PATH, activeListId);
     lastSyncedRef.current = items;
-    set(itemsRef, itemsArrayToRecord(items));
+    setDoc(
+      listDocRef,
+      { items: itemsArrayToRecord(items) },
+      { merge: true }
+    ).catch((error) => {
+      console.error("Failed to sync items", error);
+    });
   }, [items, itemsState.listId, activeListId]);
 
   useEffect(() => {
-    const usersRef = ref(rtdb, USERS_PATH);
+    const usersRef = collection(db, USERS_PATH);
 
-    const unsubscribe = onValue(usersRef, (snapshot) => {
-      const raw = snapshot.val();
-      if (!raw) {
-        setUserDirectory({});
-        return;
-      }
-
-      const entries = Array.isArray(raw)
-        ? raw.entries()
-        : Object.entries(raw);
+    const unsubscribe = onSnapshot(usersRef, (snapshot) => {
       const directory = {};
 
-      for (const [key, value] of entries) {
-        if (!value || typeof value !== "object") continue;
+      snapshot.docs.forEach((userDoc) => {
+        const value = userDoc.data();
+        if (!value || typeof value !== "object") return;
         const rawEmail =
-          (value.email ?? decodeEmailKey(key))?.toString().trim();
+          (value.email ?? decodeEmailKey(userDoc.id))?.toString().trim() ?? "";
         const rawName = (value.name ?? value.displayName ?? "")
           .toString()
           .trim();
-        if (!isValidEmail(rawEmail)) continue;
+        if (!isValidEmail(rawEmail)) return;
 
         const normalizedEmail = normalizeEmailValue(rawEmail);
         directory[normalizedEmail] = {
           email: rawEmail,
           name: rawName,
         };
-      }
+      });
 
       setUserDirectory(directory);
     });
