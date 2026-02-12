@@ -1,13 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Form from "./components/Form";
 import List from "./components/List";
 import MembersPanel from "./components/MembersPanel";
@@ -16,24 +7,56 @@ import UserSetup from "./components/UserSetup";
 import { ToastProvider, useToast } from "./components/ToastProvider";
 import baseCatalog from "./data/products.json";
 import { db } from "./firebase";
+import { useCatalogSubscription } from "./hooks/useCatalog";
+import { useActiveListItemsSubscription } from "./hooks/useActiveListItems";
+import { useListsSubscription } from "./hooks/useLists";
 import { useMembersData } from "./hooks/useMembersData";
-import { normalizeName } from "./utils/items";
-import { isValidEmail } from "./utils/validation";
+import { useUserProfileSync } from "./hooks/useUserProfileSync";
+import { useUsersSubscription } from "./hooks/useUsers";
+import { setCatalogEntries } from "./services/catalogService";
 import {
-  decodeEmailKey,
-  encodeEmailKey,
-  normalizeEmailValue,
-} from "./utils/email";
+  createList,
+  deleteListById,
+  updateList,
+} from "./services/listsService";
+import {
+  initializeListItemsStore,
+  syncListItems,
+} from "./services/itemsService";
+import { itemsArrayToRecord, normalizeItem, normalizeName } from "./utils/items";
+import {
+  isFamilyListName,
+  normalizeListEntry,
+  shouldPreferFamilyEntry,
+} from "./utils/lists";
+import { isValidEmail } from "./utils/validation";
+import { decodeEmailKey, normalizeEmailValue } from "./utils/email";
+import {
+  areCatalogCollectionsEqual,
+  areItemsCollectionsEqual,
+} from "./utils/compare";
+import {
+  dedupeAndPreferLists,
+  buildUserDirectoryFromSnapshot,
+  resolveListEntryFromDoc,
+  resolveItemsFromRawStore,
+  resolveCatalogEntriesFromSnapshotData,
+} from "./utils/snapshotTransforms";
+import { dedupeCatalog, normalizeCatalogItem } from "./utils/catalog";
 import "./styles/app.css";
 
 const DEFAULT_CATEGORY = "Другое";
 const FAMILY_LIST_NAME = "Семейный список";
-const CATALOG_COLLECTION = "shopping";
-const CATALOG_DOCUMENT = "catalog";
-const LISTS_PATH = "lists";
-const USERS_PATH = "users";
 const EMPTY_ITEMS = Object.freeze([]);
 const USER_STORAGE_KEY = "shoppingListApp.currentUser";
+
+function generateItemId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `item-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 function normalizeUser(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -83,161 +106,10 @@ function persistUser(user) {
   }
 }
 
-function normalizeItem(item) {
-  if (!item) return null;
-
-  return {
-    id: item.id ?? Date.now(),
-    name: item.name ?? "",
-    bought: Boolean(item.bought),
-    category: item.category ?? DEFAULT_CATEGORY,
-    active: item.active ?? true,
-  };
-}
-
-function normalizeCatalogItem(item) {
-  if (!item) return null;
-
-  const name = (item.name ?? "").toString().trim();
-  if (!name) return null;
-
-  const categoryValue = (item.category ?? DEFAULT_CATEGORY).toString().trim();
-  const category = categoryValue || DEFAULT_CATEGORY;
-
-  return {
-    name,
-    category,
-  };
-}
-
-function isFamilyListName(name) {
-  return normalizeName(name ?? "") === normalizeName(FAMILY_LIST_NAME);
-}
-
-function getListItemsCount(entry) {
-  if (!entry || !entry.items) return 0;
-  if (Array.isArray(entry.items)) {
-    return entry.items.length;
-  }
-  if (typeof entry.items === "object") {
-    return Object.keys(entry.items).length;
-  }
-  return 0;
-}
-
-function shouldPreferFamilyEntry(existingEntry, candidateEntry, activeListId) {
-  if (!candidateEntry) return false;
-  if (!existingEntry) return true;
-
-  if (candidateEntry.id === activeListId && existingEntry.id !== activeListId) {
-    return true;
-  }
-  if (existingEntry.id === activeListId && candidateEntry.id !== activeListId) {
-    return false;
-  }
-
-  const candidateItems = getListItemsCount(candidateEntry);
-  const existingItems = getListItemsCount(existingEntry);
-  if (candidateItems !== existingItems) {
-    return candidateItems > existingItems;
-  }
-
-  const candidateMembers = Array.isArray(candidateEntry.members)
-    ? candidateEntry.members.length
-    : 0;
-  const existingMembers = Array.isArray(existingEntry.members)
-    ? existingEntry.members.length
-    : 0;
-  if (candidateMembers !== existingMembers) {
-    return candidateMembers > existingMembers;
-  }
-
-  return false;
-}
-
-function normalizeListEntry(id, value, currentUser) {
-  if (!value) return null;
-
-  const name = (value.name ?? "").toString().trim();
-  const rawMembers = Array.isArray(value.members) ? value.members : [];
-  const memberSet = new Map();
-  rawMembers
-    .map((member) => (member ?? "").toString().trim())
-    .filter(Boolean)
-    .forEach((member) => {
-      const key = normalizeEmailValue(member);
-      if (!key) return;
-      if (!memberSet.has(key)) {
-        memberSet.set(key, member);
-      }
-    });
-
-  const currentEmail = (currentUser?.email ?? "").toString().trim();
-  const normalizedCurrentEmail = normalizeEmailValue(currentEmail);
-
-  if (normalizedCurrentEmail && !memberSet.has(normalizedCurrentEmail)) {
-    memberSet.set(normalizedCurrentEmail, currentEmail);
-  }
-
-  const members = Array.from(memberSet.values());
-  const items =
-    value.items && typeof value.items === "object" ? value.items : {};
-
-  const resolvedId =
-    (value.id ?? id ?? "").toString().trim() || `list-${String(id)}`;
-
-  return {
-    id: resolvedId,
-    name: name || "Без названия",
-    members,
-    items,
-  };
-}
-
-function itemsArrayToRecord(items) {
-  const record = {};
-
-  items.forEach((item) => {
-    if (!item) return;
-    const normalized = normalizeItem(item);
-    if (!normalized) return;
-    const key = String(normalized.id);
-    record[key] = normalized;
-  });
-
-  return record;
-}
-
-function dedupeCatalog(entries) {
-  const seen = new Map();
-  const result = [];
-
-  entries.forEach((entry) => {
-    const normalized = normalizeCatalogItem(entry);
-    if (!normalized) return;
-
-    const key = normalizeName(normalized.name);
-    if (seen.has(key)) {
-      const existingIndex = seen.get(key);
-      const existing = result[existingIndex];
-      if (!existing.category && normalized.category) {
-        result[existingIndex] = { ...existing, category: normalized.category };
-      }
-      return;
-    }
-
-    seen.set(key, result.length);
-    result.push(normalized);
-  });
-
-  return result;
-}
-
-const INITIAL_CATALOG = dedupeCatalog(baseCatalog);
-
-function areItemsEqual(first, second) {
-  return JSON.stringify(first) === JSON.stringify(second);
-}
+const INITIAL_CATALOG = dedupeCatalog(baseCatalog, {
+  normalizeName,
+  defaultCategory: DEFAULT_CATEGORY,
+});
 
 function AppContent() {
   const { showToast } = useToast();
@@ -278,10 +150,10 @@ function AppContent() {
   const hasSeededDefaultListRef = useRef(false);
   const currentItemsListIdRef = useRef(null);
   const activeListIdRef = useRef(null);
-  const lastSyncedUserProfileRef = useRef({ email: null, name: null });
+  const listsRef = useRef([]);
   const normalizedCurrentUserEmail = useMemo(() => {
     const email = (currentUser?.email ?? "").toString().trim();
-    return email.toLowerCase();
+    return normalizeEmailValue(email);
   }, [currentUser]);
 
   const allKnownUserEmails = useMemo(() => {
@@ -349,40 +221,10 @@ function AppContent() {
   }, [activeListId]);
 
   useEffect(() => {
-    if (!currentUser) return;
-    const trimmedEmail = (currentUser.email ?? "").toString().trim();
-    const trimmedName = (currentUser.name ?? "").toString().trim();
-    const normalizedEmail = normalizeEmailValue(trimmedEmail);
-    if (!normalizedEmail || !isValidEmail(trimmedEmail) || !trimmedName) {
-      return;
-    }
+    listsRef.current = lists;
+  }, [lists]);
 
-    const lastSynced = lastSyncedUserProfileRef.current;
-    if (
-      lastSynced.email === trimmedEmail &&
-      lastSynced.name === trimmedName
-    ) {
-      return;
-    }
-
-    lastSyncedUserProfileRef.current = {
-      email: trimmedEmail,
-      name: trimmedName,
-    };
-
-    const userRef = doc(db, USERS_PATH, encodeEmailKey(trimmedEmail));
-    setDoc(
-      userRef,
-      {
-        email: trimmedEmail,
-        name: trimmedName,
-        updatedAt: Date.now(),
-      },
-      { merge: true }
-    ).catch((error) => {
-      console.error("Failed to sync user profile", error);
-    });
-  }, [currentUser]);
+  useUserProfileSync({ db, currentUser });
 
   function updateActiveListItems(updater) {
     if (!activeListId) return;
@@ -399,7 +241,7 @@ function AppContent() {
 
       if (
         prev.listId === activeListId &&
-        (nextData === prevData || areItemsEqual(prevData, nextData))
+        (nextData === prevData || areItemsCollectionsEqual(prevData, nextData))
       ) {
         return prev;
       }
@@ -446,10 +288,13 @@ function AppContent() {
     const resolvedCategory = category || DEFAULT_CATEGORY;
     const normName = normalizeName(trimmedName);
 
-    const normalizedEntry = normalizeCatalogItem({
-      name: trimmedName,
-      category: resolvedCategory,
-    });
+    const normalizedEntry = normalizeCatalogItem(
+      {
+        name: trimmedName,
+        category: resolvedCategory,
+      },
+      DEFAULT_CATEGORY
+    );
     if (!normalizedEntry) return;
 
     setCatalog((prev) => {
@@ -549,7 +394,7 @@ function AppContent() {
       const normalized = email.trim();
       if (!normalized) return;
       if (!isValidEmail(normalized)) return;
-      const key = normalized.toLowerCase();
+      const key = normalizeEmailValue(normalized);
       if (seenMembers.has(key)) return;
       seenMembers.add(key);
       uniqueMembers.push(normalized);
@@ -563,8 +408,7 @@ function AppContent() {
 
     try {
       setIsSubmittingList(true);
-      const listsRef = collection(db, LISTS_PATH);
-      const newListRef = await addDoc(listsRef, payload);
+      const newListRef = await createList(db, payload);
       const newId = newListRef.id;
 
       const normalized = normalizeListEntry(newId, payload, currentUser);
@@ -619,8 +463,7 @@ function AppContent() {
 
     try {
       setIsRenamingSubmitting(true);
-      const listRef = doc(db, LISTS_PATH, activeListId);
-      await updateDoc(listRef, { name: trimmed });
+      await updateList(db, activeListId, { name: trimmed });
       setLists((prev) =>
         prev.map((list) =>
           list.id === activeListId ? { ...list, name: trimmed } : list
@@ -659,7 +502,7 @@ function AppContent() {
     if (!confirmDelete) return;
 
     try {
-      await deleteDoc(doc(db, LISTS_PATH, activeListId));
+      await deleteListById(db, activeListId);
       showToast({
         type: "success",
         message: `Список "${listName}" удалён.`,
@@ -679,11 +522,11 @@ function AppContent() {
     isSyncedRef.current = false;
     lastSyncedRef.current = [];
     currentItemsListIdRef.current = null;
-    setLists((prev) => {
-      const next = prev.filter((list) => list.id !== activeListId);
-      const nextActive = next[0]?.id ?? null;
-      setActiveListId(nextActive);
-      return next;
+    setLists((prev) => prev.filter((list) => list.id !== activeListId));
+    setActiveListId((prevActiveId) => {
+      if (prevActiveId !== activeListId) return prevActiveId;
+      const nextLists = listsRef.current.filter((list) => list.id !== activeListId);
+      return nextLists[0]?.id ?? null;
     });
   }
 
@@ -712,8 +555,7 @@ function AppContent() {
 
     try {
       setIsInvitingMember(true);
-      const listRef = doc(db, LISTS_PATH, activeListId);
-      await updateDoc(listRef, { members: nextMembers });
+      await updateList(db, activeListId, { members: nextMembers });
       setLists((prev) =>
         prev.map((list) =>
           list.id === activeListId ? { ...list, members: nextMembers } : list
@@ -783,8 +625,7 @@ function AppContent() {
 
     try {
       setIsInvitingMember(true);
-      const listRef = doc(db, LISTS_PATH, activeListId);
-      await updateDoc(listRef, { members: nextMembers });
+      await updateList(db, activeListId, { members: nextMembers });
       setLists((prev) =>
         prev.map((list) =>
           list.id === activeListId ? { ...list, members: nextMembers } : list
@@ -866,7 +707,7 @@ function AppContent() {
     updateActiveListItems((prev) => [
       ...prev,
       {
-        id: Date.now(),
+        id: generateItemId(),
         name: trimmed,
         bought: false,
         category: resolvedCategory,
@@ -923,7 +764,7 @@ function AppContent() {
       return [
         ...prev,
         {
-          id: Date.now(),
+          id: generateItemId(),
           name: trimmed,
           bought: false,
           category: resolvedCategory,
@@ -943,100 +784,46 @@ function AppContent() {
   }
 
   useEffect(() => {
-    if (!currentUser || !currentUser.email) {
-      setLists([]);
-      setActiveListId(null);
-      return undefined;
-    }
+    if (currentUser && currentUser.email) return;
+    setLists([]);
+    setActiveListId(null);
+  }, [currentUser]);
 
-    const listsRef = collection(db, LISTS_PATH);
+  const handleListsSnapshot = useCallback(
+    (snapshot) => {
+      if (!currentUser || !currentUser.email) return;
 
-    const processEntry = (listDoc) => {
-      if (!listDoc.exists()) return null;
-      const value = listDoc.data();
-      if (!value) return null;
-
-      const rawMembers = Array.isArray(value.members) ? value.members : [];
-      const trimmedRawMembers = rawMembers
-        .map((member) => (member ?? "").toString().trim())
-        .filter(Boolean);
-      const normalizedRawMembers = trimmedRawMembers
-        .map((member) => normalizeEmailValue(member))
-        .filter(Boolean);
-      const isFamilyList = isFamilyListName(value.name);
-
-      const hasCurrentInRaw =
-        normalizedCurrentUserEmail &&
-        normalizedRawMembers.some(
-          (member) => member === normalizedCurrentUserEmail
-        );
-
-      if (!isFamilyList && !hasCurrentInRaw) {
-        return null;
-      }
-
-      const normalized = normalizeListEntry(
-        listDoc.id,
-        value,
-        currentUser
+      const resolvedWithMeta = snapshot.docs.map((listDoc) =>
+        resolveListEntryFromDoc(listDoc, {
+          currentUser,
+          normalizedCurrentUserEmail,
+          normalizeListEntry,
+          isFamilyListName,
+          normalizeEmailValue,
+          isValidEmail,
+        })
       );
-      if (!normalized) return null;
 
-      const shouldUpdateMembers =
-        normalized.members.length !== trimmedRawMembers.length ||
-        normalized.members.some(
-          (member, index) =>
-            (member ?? "").toString().trim() !== trimmedRawMembers[index]
-        );
+      resolvedWithMeta
+        .filter((meta) => meta.shouldUpdateMembers && meta.docId)
+        .forEach((meta) => {
+          updateList(db, meta.docId, { members: meta.normalizedMembers }).catch(
+            (error) => {
+              console.error("Failed to update members", error);
+            }
+          );
+        });
 
-      if (shouldUpdateMembers) {
-        updateDoc(listDoc.ref, { members: normalized.members }).catch(
-          (error) => {
-            console.error("Failed to update members", error);
-          }
-        );
-      }
-
-      return normalized;
-    };
-
-    const unsubscribe = onSnapshot(listsRef, (snapshot) => {
-      const resolved = snapshot.docs
-        .map((listDoc) => processEntry(listDoc))
-        .filter(Boolean);
-
-      const uniqueById = [];
-      const seenIds = new Set();
-      let familyListIndex = null;
+      const resolved = resolvedWithMeta
+        .filter((meta) => meta.entry)
+        .map((meta) => meta.entry);
 
       const preferredActiveListId = activeListIdRef.current;
-
-      resolved.forEach((entry) => {
-        if (!entry) return;
-
-        if (isFamilyListName(entry.name)) {
-          if (familyListIndex === null) {
-            uniqueById.push(entry);
-            familyListIndex = uniqueById.length - 1;
-          } else if (
-            shouldPreferFamilyEntry(
-              uniqueById[familyListIndex],
-              entry,
-              preferredActiveListId
-            )
-          ) {
-            uniqueById[familyListIndex] = entry;
-          }
-          return;
-        }
-
-        const key =
-          entry.id ??
-          normalizeName(entry.name) ??
-          `list-${uniqueById.length}`;
-        if (seenIds.has(key)) return;
-        seenIds.add(key);
-        uniqueById.push(entry);
+      const uniqueById = dedupeAndPreferLists(resolved, {
+        isFamilyListName,
+        shouldPreferFamilyEntry,
+        normalizeName,
+        preferredActiveListId,
       });
 
       setLists(uniqueById);
@@ -1058,7 +845,7 @@ function AppContent() {
           items: {},
         };
 
-        addDoc(listsRef, payload)
+        createList(db, payload)
           .then((newDoc) => {
             const newId = newDoc.id;
             if (newId) {
@@ -1079,12 +866,18 @@ function AppContent() {
             hasSeededDefaultListRef.current = false;
           });
       }
-    });
+    },
+    [currentUser, normalizedCurrentUserEmail]
+  );
 
-    return () => {
-      unsubscribe();
-    };
-  }, [currentUser, normalizedCurrentUserEmail]);
+  useListsSubscription({
+    db,
+    enabled: Boolean(currentUser?.email),
+    onSnapshot: handleListsSnapshot,
+    onError: (error) => {
+      console.error("Failed to subscribe lists", error);
+    },
+  });
 
   useEffect(() => {
     if (!lists || lists.length === 0) {
@@ -1112,107 +905,96 @@ function AppContent() {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    const catalogDocRef = doc(db, CATALOG_COLLECTION, CATALOG_DOCUMENT);
+  const handleCatalogSnapshot = useCallback((snapshot) => {
+    const rawData = snapshot.data();
 
-    const unsubscribe = onSnapshot(catalogDocRef, (snapshot) => {
-      const rawData = snapshot.data();
+    if (!snapshot.exists()) {
+      if (hasSeededCatalogRef.current) return;
 
-      if (!snapshot.exists()) {
-        if (hasSeededCatalogRef.current) return;
-
-        hasSeededCatalogRef.current = true;
-        lastCatalogSyncedRef.current = INITIAL_CATALOG;
-        isCatalogSyncedRef.current = true;
-        setCatalog(INITIAL_CATALOG);
-        setDoc(catalogDocRef, { entries: INITIAL_CATALOG }).catch((error) => {
-          console.error("Failed to seed catalog", error);
-        });
-        return;
-      }
-
-      const rawEntries =
-        rawData && typeof rawData === "object"
-          ? rawData.entries ?? rawData
-          : null;
-
-      let resolved = [];
-      if (Array.isArray(rawEntries)) {
-        resolved = dedupeCatalog(rawEntries);
-      } else if (rawEntries && typeof rawEntries === "object") {
-        resolved = dedupeCatalog(Object.values(rawEntries));
-      }
-
-      if (resolved.length === 0 && !hasSeededCatalogRef.current) {
-        hasSeededCatalogRef.current = true;
-        lastCatalogSyncedRef.current = INITIAL_CATALOG;
-        isCatalogSyncedRef.current = true;
-        setCatalog(INITIAL_CATALOG);
-        setDoc(catalogDocRef, { entries: INITIAL_CATALOG }).catch((error) => {
-          console.error("Failed to seed empty catalog", error);
-        });
-        return;
-      }
-
-      hasSeededCatalogRef.current =
-        hasSeededCatalogRef.current || resolved.length > 0;
-      lastCatalogSyncedRef.current = resolved;
+      hasSeededCatalogRef.current = true;
+      lastCatalogSyncedRef.current = INITIAL_CATALOG;
       isCatalogSyncedRef.current = true;
-      setCatalog(resolved);
-    });
+      setCatalog(INITIAL_CATALOG);
+      setCatalogEntries(db, INITIAL_CATALOG).catch((error) => {
+        console.error("Failed to seed catalog", error);
+      });
+      return;
+    }
 
+    const resolved = resolveCatalogEntriesFromSnapshotData(
+      rawData,
+      (entries) =>
+        dedupeCatalog(entries, {
+          normalizeName,
+          defaultCategory: DEFAULT_CATEGORY,
+        })
+    );
+
+    if (resolved.length === 0 && !hasSeededCatalogRef.current) {
+      hasSeededCatalogRef.current = true;
+      lastCatalogSyncedRef.current = INITIAL_CATALOG;
+      isCatalogSyncedRef.current = true;
+      setCatalog(INITIAL_CATALOG);
+      setCatalogEntries(db, INITIAL_CATALOG).catch((error) => {
+        console.error("Failed to seed empty catalog", error);
+      });
+      return;
+    }
+
+    hasSeededCatalogRef.current =
+      hasSeededCatalogRef.current || resolved.length > 0;
+    lastCatalogSyncedRef.current = resolved;
+    isCatalogSyncedRef.current = true;
+    setCatalog(resolved);
+  }, []);
+
+  useCatalogSubscription({
+    db,
+    onSnapshot: handleCatalogSnapshot,
+    onError: (error) => {
+      console.error("Failed to subscribe catalog", error);
+    },
+  });
+
+  useEffect(() => {
     return () => {
-      unsubscribe();
       isCatalogSyncedRef.current = false;
     };
   }, []);
 
   useEffect(() => {
     if (!isCatalogSyncedRef.current) return;
-    if (areItemsEqual(lastCatalogSyncedRef.current, catalog)) return;
+    if (areCatalogCollectionsEqual(lastCatalogSyncedRef.current, catalog)) return;
 
-    const catalogDocRef = doc(db, CATALOG_COLLECTION, CATALOG_DOCUMENT);
     lastCatalogSyncedRef.current = catalog;
-    setDoc(catalogDocRef, { entries: catalog }).catch((error) => {
+    setCatalogEntries(db, catalog).catch((error) => {
       console.error("Failed to sync catalog", error);
     });
   }, [catalog]);
 
-  useEffect(() => {
-    if (!activeListId) {
-      isSyncedRef.current = false;
-      lastSyncedRef.current = [];
-      currentItemsListIdRef.current = null;
-      setItemsState({ listId: null, data: [] });
-      return;
-    }
+  const handleInactiveListItems = useCallback(() => {
+    isSyncedRef.current = false;
+    lastSyncedRef.current = [];
+    currentItemsListIdRef.current = null;
+    setItemsState({ listId: null, data: [] });
+  }, []);
 
-    const listId = activeListId;
-
+  const handleBeforeListItemsSubscribe = useCallback((listId) => {
     if (currentItemsListIdRef.current !== listId) {
       isSyncedRef.current = false;
       lastSyncedRef.current = [];
       setItemsState({ listId, data: [] });
     }
-
     currentItemsListIdRef.current = listId;
-    const listDocRef = doc(db, LISTS_PATH, listId);
+  }, []);
 
-    const unsubscribe = onSnapshot(listDocRef, (snapshot) => {
+  const handleListItemsSnapshot = useCallback((listId, snapshot) => {
       const data = snapshot.data();
       const raw = data?.items ?? null;
-      let resolved = [];
-
-      if (Array.isArray(raw)) {
-        resolved = raw.map((item) => normalizeItem(item)).filter(Boolean);
-      } else if (raw && typeof raw === "object") {
-        resolved = Object.values(raw)
-          .map((item) => normalizeItem(item))
-          .filter(Boolean);
-      }
+      const resolved = resolveItemsFromRawStore(raw, normalizeItem);
 
       if ((raw === null || raw === undefined) && snapshot.exists()) {
-        setDoc(listDocRef, { items: {} }, { merge: true }).catch((error) => {
+        initializeListItemsStore(db, listId).catch((error) => {
           console.error("Failed to initialize items store", error);
         });
       }
@@ -1220,64 +1002,53 @@ function AppContent() {
       lastSyncedRef.current = resolved;
       isSyncedRef.current = true;
       setItemsState({ listId, data: resolved });
-    });
+    }, []);
 
-    return () => {
-      unsubscribe();
-      if (currentItemsListIdRef.current === listId) {
-        currentItemsListIdRef.current = null;
-        isSyncedRef.current = false;
-      }
-    };
-  }, [activeListId]);
+  const handleListItemsCleanup = useCallback((listId) => {
+    if (currentItemsListIdRef.current === listId) {
+      currentItemsListIdRef.current = null;
+      isSyncedRef.current = false;
+    }
+  }, []);
+
+  useActiveListItemsSubscription({
+    db,
+    activeListId,
+    onInactive: handleInactiveListItems,
+    onBeforeSubscribe: handleBeforeListItemsSubscribe,
+    onSnapshot: handleListItemsSnapshot,
+    onCleanup: handleListItemsCleanup,
+    onError: (error) => {
+      console.error("Failed to subscribe active list items", error);
+    },
+  });
 
   useEffect(() => {
     if (!activeListId) return;
     if (itemsState.listId !== activeListId) return;
     if (!isSyncedRef.current) return;
-    if (areItemsEqual(lastSyncedRef.current, items)) return;
+    if (areItemsCollectionsEqual(lastSyncedRef.current, items)) return;
 
-    const listDocRef = doc(db, LISTS_PATH, activeListId);
     lastSyncedRef.current = items;
-    setDoc(
-      listDocRef,
-      { items: itemsArrayToRecord(items) },
-      { merge: true }
-    ).catch((error) => {
+    syncListItems(db, activeListId, itemsArrayToRecord(items)).catch((error) => {
       console.error("Failed to sync items", error);
     });
   }, [items, itemsState.listId, activeListId]);
 
-  useEffect(() => {
-    const usersRef = collection(db, USERS_PATH);
-
-    const unsubscribe = onSnapshot(usersRef, (snapshot) => {
-      const directory = {};
-
-      snapshot.docs.forEach((userDoc) => {
-        const value = userDoc.data();
-        if (!value || typeof value !== "object") return;
-        const rawEmail =
-          (value.email ?? decodeEmailKey(userDoc.id))?.toString().trim() ?? "";
-        const rawName = (value.name ?? value.displayName ?? "")
-          .toString()
-          .trim();
-        if (!isValidEmail(rawEmail)) return;
-
-        const normalizedEmail = normalizeEmailValue(rawEmail);
-        directory[normalizedEmail] = {
-          email: rawEmail,
-          name: rawName,
-        };
+  useUsersSubscription({
+    db,
+    onSnapshot: (snapshot) => {
+      const directory = buildUserDirectoryFromSnapshot(snapshot, {
+        decodeEmailKey,
+        isValidEmail,
+        normalizeEmailValue,
       });
-
       setUserDirectory(directory);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    },
+    onError: (error) => {
+      console.error("Failed to subscribe users", error);
+    },
+  });
 
   const isShoppingTab = activeTab === "shopping";
   const isAllTab = activeTab === "all";
@@ -1314,6 +1085,7 @@ function AppContent() {
                 className="app-title-save"
                 disabled={isRenamingSubmitting || !renameListValue.trim()}
                 title="Сохранить"
+                aria-label="Сохранить название списка"
               >
                 💾
               </button>
@@ -1323,6 +1095,7 @@ function AppContent() {
                 onClick={handleRenameCancel}
                 disabled={isRenamingSubmitting}
                 title="Отмена"
+                aria-label="Отменить переименование списка"
               >
                 ✖️
               </button>
@@ -1368,6 +1141,7 @@ function AppContent() {
                           }}
                           disabled={isRenamingSubmitting}
                           title="Переименовать список"
+                          aria-label="Переименовать список"
                         >
                           ✏️
                         </button>
@@ -1376,6 +1150,7 @@ function AppContent() {
                           className="app-title-action"
                           onClick={handleDeleteList}
                           title="Удалить список"
+                          aria-label="Удалить список"
                         >
                           🗑️
                         </button>

@@ -28,10 +28,7 @@ export function useMembersData({
         const trimmed = (member ?? "").toString().trim();
         if (!trimmed) return null;
         const normalizedEmail = normalizeEmailValue(trimmed);
-        if (!normalizedEmail || normalizedEmail === normalizeEmailValue(currentUserEmail)) {
-          return null;
-        }
-        if (normalizedEmail === normalizedCurrentEmail) {
+        if (!normalizedEmail || normalizedEmail === normalizedCurrentEmail) {
           return null;
         }
 

@@ -1,22 +1,29 @@
-# React + Vite
+# shopping-list-app
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite + Firebase приложение для совместных списков покупок.
 
-Currently, two official plugins are available:
+## Requirements
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 18+
+- npm 9+
 
-## React Compiler
+## Scripts
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `npm run dev` — запуск локальной разработки (Vite dev server)
+- `npm run build` — production build
+- `npm run preview` — просмотр production build локально
+- `npm run lint` — проверка ESLint
 
-## Expanding the ESLint configuration
+## Run locally
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. `npm install`
+2. `npm run dev`
 
-## Notes about Firebase API Keys
+## Data model and Firestore
 
-Firebase Web API keys are **not private**.  
-They are safe to commit publicly because they cannot be used to access your Firebase project without the proper security rules.  
-If GitHub alerts about “exposed API keys”, you can safely ignore it for Firebase Web apps.
+- Текущая клиентская модель данных: `docs/data-model.md`
+- Заглушка для правил безопасности Firestore: `firestore.rules`
+
+## Notes
+
+Firebase Web API key в клиентском приложении не является секретом, но безопасность доступа определяется Firestore Rules.

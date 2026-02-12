@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // TODO: Define production security rules for shopping-list-app.
+    // Keep in sync with client data model in docs/data-model.md.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

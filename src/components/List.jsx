@@ -48,6 +48,7 @@ export default function List({
   const [recentlyAddedIds, setRecentlyAddedIds] = useState(() => new Set());
   const previousIdsRef = useRef(new Set(items.map((item) => item.id)));
   const animationTimeoutsRef = useRef([]);
+  const purchaseTimeoutsRef = useRef(new Map());
   const mode = activeTab ?? internalMode;
   const isShoppingView = mode === VIEW_MODES.shopping;
   const prefersReducedMotion = usePrefersReducedMotion();
@@ -63,11 +64,18 @@ export default function List({
   };
 
   useEffect(() => {
+    const animationTimeouts = animationTimeoutsRef;
+    const purchaseTimeouts = purchaseTimeoutsRef;
+
     return () => {
-      animationTimeoutsRef.current.forEach((timeoutId) => {
+      animationTimeouts.current.forEach((timeoutId) => {
         clearTimeout(timeoutId);
       });
-      animationTimeoutsRef.current = [];
+      animationTimeouts.current = [];
+      purchaseTimeouts.current.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      purchaseTimeouts.current.clear();
     };
   }, []);
 
@@ -133,11 +141,16 @@ export default function List({
   }, [items, shouldAnimate]);
 
   function handlePurchase(id) {
+    if (purchaseTimeoutsRef.current.has(id)) return;
     setRemovingId(id);
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
+      purchaseTimeoutsRef.current.delete(id);
       onPurchase(id);
-      setRemovingId(null);
+      setRemovingId((currentRemovingId) =>
+        currentRemovingId === id ? null : currentRemovingId
+      );
     }, 200); // короткая задержка для плавного исчезновения
+    purchaseTimeoutsRef.current.set(id, timeoutId);
   }
 
   const catalogCategories = useMemo(() => {
@@ -289,6 +302,7 @@ export default function List({
                       <button
                         type="button"
                         className="item-delete"
+                        aria-label={`Удалить ${item.name}`}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
