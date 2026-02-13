@@ -263,3 +263,14 @@ input[type="checkbox"] {
 .shopping-list li + li {
   margin-top: var(--space-2xs);
 }
+
+.category-list-button {
+  border: 1px solid var(--input-border);
+  background-color: var(--surface-alt);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  width: 100%;
+  text-align: left;
+}

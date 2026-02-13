@@ -116,7 +116,7 @@ function AppContent() {
   const [currentUser, setCurrentUser] = useState(() => loadStoredUser());
   const [itemsState, setItemsState] = useState({ listId: null, data: [] });
   const [catalog, setCatalog] = useState([]);
-  const [activeTab, setActiveTab] = useState("all");
+  const [activeTab, setActiveTab] = useState("categories");
   const [lists, setLists] = useState([]);
   const [activeListId, setActiveListId] = useState(null);
   const [isCreatingList, setIsCreatingList] = useState(false);

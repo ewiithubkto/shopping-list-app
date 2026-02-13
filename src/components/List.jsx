@@ -3,6 +3,7 @@ import { getItemKey } from "../utils/items";
 import "../styles/list.css";
 
 const VIEW_MODES = {
+  categories: "categories",
   catalog: "all",
   shopping: "shopping",
 };
@@ -44,13 +45,16 @@ export default function List({
   onTabChange,
 }) {
   const [removingId, setRemovingId] = useState(null);
-  const [internalMode, setInternalMode] = useState(VIEW_MODES.catalog);
+  const [internalMode, setInternalMode] = useState(VIEW_MODES.categories);
   const [recentlyAddedIds, setRecentlyAddedIds] = useState(() => new Set());
+  const [categorySearch, setCategorySearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState(null);
   const previousIdsRef = useRef(new Set(items.map((item) => item.id)));
   const animationTimeoutsRef = useRef([]);
   const purchaseTimeoutsRef = useRef(new Map());
   const mode = activeTab ?? internalMode;
   const isShoppingView = mode === VIEW_MODES.shopping;
+  const isCategoriesView = mode === VIEW_MODES.categories;
   const prefersReducedMotion = usePrefersReducedMotion();
   const shouldAnimate = !prefersReducedMotion;
 
@@ -62,6 +66,12 @@ export default function List({
       setInternalMode(nextMode);
     }
   };
+
+  useEffect(() => {
+    if (mode !== VIEW_MODES.categories) {
+      setSelectedCategory(null);
+    }
+  }, [mode]);
 
   useEffect(() => {
     const animationTimeouts = animationTimeoutsRef;
@@ -219,6 +229,29 @@ export default function List({
     [items]
   );
 
+  const normalizedSearch = categorySearch.trim().toLocaleLowerCase();
+
+  const filteredCatalogCategories = useMemo(() => {
+    if (!normalizedSearch) return catalogCategories;
+
+    return catalogCategories
+      .map(({ category, items: categoryItems }) => ({
+        category,
+        items: categoryItems.filter((item) =>
+          item.name.toLocaleLowerCase().includes(normalizedSearch)
+        ),
+      }))
+      .filter(({ items: categoryItems }) => categoryItems.length > 0);
+  }, [catalogCategories, normalizedSearch]);
+
+  const selectedCategoryEntry = useMemo(
+    () =>
+      filteredCatalogCategories.find(
+        ({ category }) => category === selectedCategory
+      ) ?? null,
+    [filteredCatalogCategories, selectedCategory]
+  );
+
   const renderShoppingRow = (entry) => {
     const itemClassName = `item${
       removingId === entry.id ? " removing" : ""
@@ -245,6 +278,18 @@ export default function List({
         <button
           type="button"
           className={`view-button ${
+            isCategoriesView ? "is-active" : ""
+          }`}
+          onClick={() => changeMode(VIEW_MODES.categories)}
+        >
+          <span className="view-button__icon" aria-hidden="true">
+            🗂️
+          </span>
+          <span className="view-button__text">Категории</span>
+        </button>
+        <button
+          type="button"
+          className={`view-button ${
             mode === VIEW_MODES.catalog ? "is-active" : ""
           }`}
           onClick={() => changeMode(VIEW_MODES.catalog)}
@@ -267,6 +312,81 @@ export default function List({
           <span className="view-button__text">Покупки</span>
         </button>
       </div>
+
+      {isCategoriesView && (
+        <input
+          type="text"
+          className="app-new-list-input"
+          placeholder="Поиск товара"
+          value={categorySearch}
+          onChange={(event) => setCategorySearch(event.target.value)}
+        />
+      )}
+
+      {isCategoriesView && !selectedCategoryEntry && (
+        <div className="shopping-section">
+          {filteredCatalogCategories.length === 0 ? (
+            <p className="shopping-empty">Ничего не найдено</p>
+          ) : (
+            filteredCatalogCategories.map(({ category, items: categoryItems }) => (
+              <section key={category} className="category-section">
+                <button
+                  type="button"
+                  className="category-list-button"
+                  onClick={() => setSelectedCategory(category)}
+                >
+                  {category} ({categoryItems.length})
+                </button>
+              </section>
+            ))
+          )}
+        </div>
+      )}
+
+      {isCategoriesView && selectedCategoryEntry && (
+        <section className="category-section">
+          <h3 className="category-title">
+            {selectedCategoryEntry.category} ({selectedCategoryEntry.items.length})
+          </h3>
+          {selectedCategoryEntry.items.length === 0 ? (
+            <p className="shopping-empty">Ничего не найдено</p>
+          ) : (
+            <ul className="item-list">
+              {selectedCategoryEntry.items.map((item) => (
+                <li key={item.id} className="item">
+                  <label className="item-label">
+                    <input
+                      className="item-checkbox"
+                      type="checkbox"
+                      checked={item.active}
+                      onChange={() =>
+                        onActiveChange(
+                          item.name,
+                          item.category,
+                          !item.active
+                        )
+                      }
+                    />
+                    {item.name}
+                  </label>
+                  <button
+                    type="button"
+                    className="item-delete"
+                    aria-label={`Удалить ${item.name}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onDelete(item);
+                    }}
+                  >
+                    ❌
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {mode === VIEW_MODES.catalog &&
         catalogCategories.map(({ category, items: categoryItems }) => (

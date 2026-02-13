@@ -22,7 +22,8 @@ React + Vite + Firebase приложение для совместных спи�
 ## Data model and Firestore
 
 - Текущая клиентская модель данных: `docs/data-model.md`
-- Заглушка для правил безопасности Firestore: `firestore.rules`
+- Правила безопасности Firestore: `firestore.rules`
+- Ограничения текущей модели безопасности и roadmap: `docs/firestore-security.md`
 
 ## Notes
 
