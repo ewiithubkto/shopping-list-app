@@ -1,4 +1,4 @@
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
 
 const LISTS_PATH = "lists";
 
@@ -15,5 +15,5 @@ export function initializeListItemsStore(db, listId) {
 }
 
 export function syncListItems(db, listId, itemsRecord) {
-  return setDoc(getListDocRef(db, listId), { items: itemsRecord }, { merge: true });
+  return updateDoc(getListDocRef(db, listId), { items: itemsRecord });
 }
