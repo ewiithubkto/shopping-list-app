@@ -344,7 +344,7 @@ function AppContent() {
 
     updateActiveListItems((prev) => {
       const next = prev.filter((item) => {
-        if (linkedItemId && item.id === linkedItemId) {
+        if (linkedItemId !== null && linkedItemId !== undefined && item.id === linkedItemId) {
           return false;
         }
 
@@ -366,9 +366,7 @@ function AppContent() {
 
     const entryCategory =
       entry.category ?? entry.linkedItem?.category ?? DEFAULT_CATEGORY;
-    const linkedItemId =
-      entry.linkedItem?.id ??
-      (typeof entry.id === "number" ? entry.id : null);
+    const linkedItemId = entry.linkedItem?.id ?? entry.id ?? null;
 
     removeCatalogEntry(entryName, entryCategory, linkedItemId);
   }
